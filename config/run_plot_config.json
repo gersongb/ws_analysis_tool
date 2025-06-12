@@ -1,0 +1,27 @@
+{
+  "testing_short": {
+    "colour": "orange",
+    "continuous_line": false,
+    "blanking_window": false
+  },
+  "testing_long": {
+    "colour": "red",
+    "continuous_line": false,
+    "blanking_window": false
+  },
+  "homologation": {
+    "colour": "blue",
+    "continuous_line": true,
+    "blanking_window": false
+  },
+  "homologation_ref": {
+    "colour": "blue",
+    "continuous_line": true,
+    "blanking_window": true
+  },
+  "blanking": {
+    "colour": "green",
+    "continuous_line": false,
+    "blanking_window": false
+  }
+}

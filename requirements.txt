@@ -1,0 +1,9 @@
+# Add your project dependencies here, e.g.:
+dash
+pandas
+plotly
+dash-bootstrap-components
+numpy
+scikit-learn
+matplotlib
+h5py
