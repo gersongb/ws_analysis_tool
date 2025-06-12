@@ -1,0 +1,11 @@
+{
+  "manufacturer": "Alpine",
+  "homologation_date": "2025-06-04",
+  "session_name": "Alpine_06-2025_GGB",
+  "name_identifier": "GGB",
+  "base_folder": "C:\\Users\\g.garsed\\Documents\\wt_tool_testing",
+  "reference_folder": "C:\\Users\\g.garsed\\Documents\\wt_tool_testing\\Alpine_06-2025_GGB",
+  "wt_maps": "C:\\Users\\g.garsed\\Documents\\wt_tool_testing\\Alpine_06-2025_GGB\\wt_maps",
+  "data": "C:\\Users\\g.garsed\\Documents\\wt_tool_testing\\Alpine_06-2025_GGB\\data",
+  "raw": "C:\\Users\\g.garsed\\Documents\\wt_tool_testing\\Alpine_06-2025_GGB\\data\\raw"
+}

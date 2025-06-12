@@ -51,6 +51,10 @@ layout = dbc.Container([
         ], width=6),
         dbc.Col([
             html.H4("Create New Homologation"),
+            html.Label("Base folder:"),
+            html.Br(),
+            dcc.Input(id="new-base-folder", type="text", placeholder="Enter or paste folder path", style={"width": "90%", "marginBottom": "10px"}),
+            html.Br(),
             html.Label("Manufacturer:"),
             html.Br(),
             dcc.Dropdown(
@@ -69,9 +73,9 @@ layout = dbc.Container([
                 style={"marginBottom": "10px"}
             ),
             html.Br(),
-            html.Label("Base folder:"),
+            html.Label("Name Identifier:"),
             html.Br(),
-            dcc.Input(id="new-base-folder", type="text", placeholder="Enter or paste folder path", style={"width": "90%"}),
+            dcc.Input(id="name-identifier", type="text", placeholder="Enter identifier (optional)", style={"width": "90%", "marginBottom": "10px"}),
             html.Br(),
             dbc.Button("Create", id="create-homologation-btn", color="success", n_clicks=0, style={"marginTop": "10px"}),
             html.Div(id="create-homologation-feedback", style={"marginTop": "10px", "color": "#008800"}),
@@ -80,7 +84,7 @@ layout = dbc.Container([
     html.Hr(),
     html.H4("Homologation Reference Information"),
     html.Div(id="homologation-info-panel", style={"marginTop": "10px", "padding": "10px", "border": "1px solid #ccc", "borderRadius": "5px"}),
-    dcc.Store(id="current-homologation-store"),
+    dcc.Store(id="current-homologation-store", storage_type="session"),
 ], fluid=True)
 
 # Combined callback for create/load homologation
@@ -94,10 +98,11 @@ layout = dbc.Container([
     State("manufacturer-dropdown", "value"),
     State("homologation-date-picker", "date"),
     State("new-base-folder", "value"),
+    State("name-identifier", "value"),
     State("load-homologation-dropdown", "value"),
     prevent_initial_call=True
 )
-def handle_homologation(create_n, load_n, manufacturer, homologation_date, new_base, load_value):
+def handle_homologation(create_n, load_n, manufacturer, homologation_date, new_base, name_identifier, load_value):
     from datetime import datetime
     from data_processing.hdf5_functions import create_homologation_hdf5
     ctx = dash.callback_context
@@ -118,6 +123,8 @@ def handle_homologation(create_n, load_n, manufacturer, homologation_date, new_b
             try:
                 date_obj = datetime.strptime(homologation_date[:10], "%Y-%m-%d")
                 session_name = f"{manufacturer}_{date_obj.strftime('%m-%Y')}"
+                if name_identifier:
+                    session_name = f"{session_name}_{name_identifier}"
             except Exception:
                 create_msg = "Invalid date format."
                 return create_msg, load_msg, get_homologation_options(), data
@@ -130,6 +137,8 @@ def handle_homologation(create_n, load_n, manufacturer, homologation_date, new_b
                 data_path = os.path.join(ref_folder, "data")
                 os.makedirs(wt_maps_path, exist_ok=True)
                 os.makedirs(data_path, exist_ok=True)
+                raw_path = os.path.join(data_path, "raw")
+                os.makedirs(raw_path, exist_ok=True)
                 # Create config subfolder and copy config files
                 config_src_dir = os.path.join(os.path.dirname(__file__), "..", "config")
                 config_dst_dir = os.path.join(ref_folder, "config")
@@ -143,10 +152,12 @@ def handle_homologation(create_n, load_n, manufacturer, homologation_date, new_b
                     "manufacturer": manufacturer,
                     "homologation_date": date_obj.strftime("%Y-%m-%d"),
                     "session_name": session_name,
+                    "name_identifier": name_identifier,
                     "base_folder": new_base,
                     "reference_folder": ref_folder,
                     "wt_maps": wt_maps_path,
-                    "data": data_path
+                    "data": data_path,
+                    "raw": raw_path
                 }
                 filename = f"{session_name}.json"
                 path = os.path.join(HOMOLOGATIONS_DIR, filename)
