@@ -5,7 +5,9 @@ from dash import html, dcc, Output, Input, State, callback_context
 from dash.dependencies import ALL, Input, Output, State
 import h5py
 import numpy as np
+import json
 from dash import no_update
+from dash import dash_table
 
 # Callback to show run folders in data source folder with Import buttons
 @dash.callback(
@@ -15,7 +17,6 @@ from dash import no_update
 )
 def update_run_folder_list(homologation, n_intervals):
     from dash import html
-    import os
     if not homologation or not homologation.get("data_source_folder"):
         return html.Div("No data source folder set.", style={"color": "#888"})
     folder = homologation["data_source_folder"]
@@ -62,10 +63,27 @@ from dash.dependencies import ALL
 )
 def update_imported_runs_list(homologation, n_clicks_list, last_message):
     from dash import callback_context, no_update
+    import os
     ctx = callback_context
     
 
     message = None
+    # --- Load run_plot_config.json and set run_type_options at the top ---
+    run_plot_config_path = None
+    if homologation and "reference_folder" in homologation:
+        config_dst_dir = os.path.join(homologation["reference_folder"], "config")
+        candidate = os.path.join(config_dst_dir, "run_plot_config.json")
+        if os.path.exists(candidate):
+            run_plot_config_path = candidate
+    if not run_plot_config_path:
+        run_plot_config_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "config", "run_plot_config.json")
+        )
+    with open(run_plot_config_path, "r") as f:
+        run_plot_config = json.load(f)
+    run_type_options = list(run_plot_config.keys())
+    # --- END run_plot_config.json loading ---
+
     # Import logic
     if ctx.triggered and len(ctx.triggered) == 1 and "import-run-btn" in ctx.triggered[0]["prop_id"]:
         
@@ -103,6 +121,14 @@ def update_imported_runs_list(homologation, n_clicks_list, last_message):
                     d1_ds.attrs["columns"] = np.array(d1_colnames, dtype='S')
                     d2_ds = run_grp.create_dataset("d2", data=d2, compression="gzip")
                     d2_ds.attrs["columns"] = np.array(d2_colnames, dtype='S')
+                    run_grp.attrs["description"] = "no description available"
+                    run_grp.attrs["weighted_Cz"] = 0.0
+                    run_grp.attrs["weighted_Cx"] = 0.0
+                    run_grp.attrs["offset_Cz"] = 0.0
+                    run_grp.attrs["offset_Cx"] = 0.0
+                    # Set run_type to the first option from run_plot_config
+                    run_grp.attrs["run_type"] = run_type_options[0] if run_type_options else ""
+
                 message = f"Imported {folder_name} successfully."
             except Exception as e:
                 message = f"Error: {e}"
@@ -110,20 +136,57 @@ def update_imported_runs_list(homologation, n_clicks_list, last_message):
         h5_path = homologation["h5_path"] if homologation and homologation.get("h5_path") else None
         run_fields = []
         if h5_path:
+            exists = os.path.exists(h5_path)
+            print(f"update_imported_runs_list: h5_path={h5_path!r}, exists={exists}")
+            if not exists:
+                print("update_imported_runs_list: HDF5 file does not exist!")
             try:
                 with h5py.File(h5_path, "r") as h5f:
+                    print(f"update_imported_runs_list: h5f keys={list(h5f.keys())}")
                     if "wt_runs" in h5f:
                         runs = list(h5f["wt_runs"].keys())
+                        print(f"update_imported_runs_list: found runs={runs}")
+                        table_data = []
                         for run in runs:
-                            desc = ""
-                            if "description" in h5f["wt_runs"][run].attrs:
-                                desc = h5f["wt_runs"][run].attrs["description"].decode() if isinstance(h5f["wt_runs"][run].attrs["description"], bytes) else h5f["wt_runs"][run].attrs["description"]
-                            run_fields.append(
-                                html.Div([
-                                    html.Span(run, style={"fontWeight": "bold", "marginRight": "10px"}),
-                                    dcc.Input(id={"type": "run-desc-input", "index": run}, value=desc, placeholder="Enter description", debounce=True, style={"width": "300px", "marginRight": "10px"})
-                                ], style={"marginBottom": "8px", "display": "flex", "alignItems": "center"})
+                            run_attrs = h5f["wt_runs"][run].attrs
+                            def get_attr(key):
+                                v = run_attrs.get(key, "")
+                                if isinstance(v, bytes):
+                                    v = v.decode()
+                                return v
+                            rt_value = get_attr("run_type")
+                            if not rt_value and run_type_options:
+                                rt_value = run_type_options[0]
+                                print(f"update_imported_runs_list: run_type not found for {run}, using {rt_value}")
+                            table_data.append({
+                                "run": run,
+                                "description": get_attr("description"),
+                                "weighted_Cz": get_attr("weighted_Cz"),
+                                "weighted_Cx": get_attr("weighted_Cx"),
+                                "offset_Cz": get_attr("offset_Cz"),
+                                "offset_Cx": get_attr("offset_Cx"),
+                                "run_type": rt_value,
+                            })
+                        run_fields = [
+                            dash_table.DataTable(
+                                id="imported-runs-table",
+                                columns=[
+                                    {"name": "Run", "id": "run"},
+                                    {"name": "Description", "id": "description"},
+                                    {"name": "Weighted Cz", "id": "weighted_Cz"},
+                                    {"name": "Weighted Cx", "id": "weighted_Cx"},
+                                    {"name": "Offset Cz", "id": "offset_Cz"},
+                                    {"name": "Offset Cx", "id": "offset_Cx"},
+                                    {"name": "Run Type", "id": "run_type"},
+                                ],
+                                data=table_data,
+                                style_table={"overflowX": "auto"},
+                                style_cell={"textAlign": "left", "minWidth": "100px", "maxWidth": "250px", "whiteSpace": "normal"},
+                                style_header={"fontWeight": "bold", "backgroundColor": "#f5f5f5"},
+                                page_size=20,
                             )
+                        ]
+
             except Exception as e:
                 message = f"Error: {e}"
         # Show success/error message, else show importing message
@@ -133,20 +196,64 @@ def update_imported_runs_list(homologation, n_clicks_list, last_message):
     h5_path = homologation["h5_path"] if homologation and homologation.get("h5_path") else None
     run_fields = []
     if h5_path:
+        import os
+        exists = os.path.exists(h5_path)
+        print(f"update_imported_runs_list: h5_path={h5_path!r}, exists={exists}")
+        if not exists:
+            print("update_imported_runs_list: HDF5 file does not exist!")
         try:
             with h5py.File(h5_path, "r") as h5f:
+                print(f"update_imported_runs_list: h5f keys={list(h5f.keys())}")
                 if "wt_runs" in h5f:
                     runs = list(h5f["wt_runs"].keys())
+                    print(f"update_imported_runs_list: found runs={runs}")
+                    table_data = []
                     for run in runs:
-                        desc = ""
-                        if "description" in h5f["wt_runs"][run].attrs:
-                            desc = h5f["wt_runs"][run].attrs["description"].decode() if isinstance(h5f["wt_runs"][run].attrs["description"], bytes) else h5f["wt_runs"][run].attrs["description"]
-                        run_fields.append(
-                            html.Div([
-                                html.Span(run, style={"fontWeight": "bold", "marginRight": "10px"}),
-                                dcc.Input(id={"type": "run-desc-input", "index": run}, value=desc, placeholder="Enter description", debounce=True, style={"width": "300px", "marginRight": "10px"})
-                            ], style={"marginBottom": "8px", "display": "flex", "alignItems": "center"})
+                        run_attrs = h5f["wt_runs"][run].attrs
+                        def get_attr(key):
+                            v = run_attrs.get(key, "")
+                            if isinstance(v, bytes):
+                                v = v.decode()
+                            return v
+                        table_data.append({
+                            "run": run,
+                            "description": get_attr("description"),
+                            "weighted_Cz": get_attr("weighted_Cz"),
+                            "weighted_Cx": get_attr("weighted_Cx"),
+                            "offset_Cz": get_attr("offset_Cz"),
+                            "offset_Cx": get_attr("offset_Cx"),
+                            "run_type": get_attr("run_type"),
+                        })
+
+
+                    run_fields = [
+                        dash_table.DataTable(
+                            id="imported-runs-table",
+                            columns=[
+                                {"name": "Run", "id": "run"},
+                                {"name": "Description", "id": "description"},
+                                {"name": "Weighted Cz", "id": "weighted_Cz"},
+                                {"name": "Weighted Cx", "id": "weighted_Cx"},
+                                {"name": "Offset Cz", "id": "offset_Cz"},
+                                {"name": "Offset Cx", "id": "offset_Cx"},
+                                {"name": "Run Type", "id": "run_type", "presentation": "dropdown"},
+                            ],
+                            data=table_data,
+                            dropdown={
+                                "run_type": {
+                                    "options": [{"label": opt, "value": opt} for opt in run_type_options]
+                                }
+                            },
+                            editable=True,
+                            style_table={"overflowX": "auto"},
+                            style_cell={"textAlign": "left", "minWidth": "100px", "maxWidth": "250px", "whiteSpace": "normal"},
+                            style_header={"fontWeight": "bold", "backgroundColor": "#f5f5f5"},
+                            page_size=20,
                         )
+                    ]
+
+
         except Exception as e:
             last_message = f"Error: {e}"
+ 
     return run_fields, last_message
