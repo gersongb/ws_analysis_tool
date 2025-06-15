@@ -207,6 +207,7 @@ def update_imported_runs_list(homologation, n_clicks_list, last_message):
                 if "wt_runs" in h5f:
                     runs = list(h5f["wt_runs"].keys())
                     print(f"update_imported_runs_list: found runs={runs}")
+                    
                     table_data = []
                     for run in runs:
                         run_attrs = h5f["wt_runs"][run].attrs
@@ -215,16 +216,35 @@ def update_imported_runs_list(homologation, n_clicks_list, last_message):
                             if isinstance(v, bytes):
                                 v = v.decode()
                             return v
+                        def to_plain_type(val):
+                            import numpy as np
+                            # Convert numpy types to Python types
+                            if isinstance(val, (np.generic, np.ndarray)):
+                                return val.item()
+                            # Remove extra quotes from strings
+                            if isinstance(val, str):
+                                v = val.strip()
+                                if v.startswith("'") and v.endswith("'") and len(v) > 1:
+                                    v = v[1:-1]
+                                # Try to convert numeric strings to float or int
+                                try:
+                                    if '.' in v or 'e' in v.lower():
+                                        return float(v)
+                                    else:
+                                        return int(v)
+                                except (ValueError, TypeError):
+                                    return v
+                                return v
+                            return val
                         table_data.append({
-                            "run": run,
-                            "description": get_attr("description"),
-                            "weighted_Cz": get_attr("weighted_Cz"),
-                            "weighted_Cx": get_attr("weighted_Cx"),
-                            "offset_Cz": get_attr("offset_Cz"),
-                            "offset_Cx": get_attr("offset_Cx"),
-                            "run_type": get_attr("run_type"),
+                            "run": to_plain_type(run),
+                            "description": to_plain_type(get_attr("description")),
+                            "weighted_Cz": to_plain_type(get_attr("weighted_Cz")),
+                            "weighted_Cx": to_plain_type(get_attr("weighted_Cx")),
+                            "offset_Cz": to_plain_type(get_attr("offset_Cz")),
+                            "offset_Cx": to_plain_type(get_attr("offset_Cx")),
+                            "run_type": to_plain_type(get_attr("run_type")),
                         })
-
 
                     run_fields = [
                         dash_table.DataTable(
@@ -251,6 +271,13 @@ def update_imported_runs_list(homologation, n_clicks_list, last_message):
                             page_size=20,
                         )
                     ]
+                    print("DEBUG: repr(table_data):")
+                    for row in table_data:
+                        print({k: v for k, v in row.items()})
+
+                    print("DEBUG: repr(run_type_options):")
+                    for opt in run_type_options:
+                        print(opt)
 
 
         except Exception as e:
