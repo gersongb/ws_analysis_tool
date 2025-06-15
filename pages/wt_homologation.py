@@ -14,6 +14,7 @@ import plotly.graph_objs as go
 import dash
 from dash import html, dcc, Output, Input
 from dash.dependencies import ALL
+from dash import dash_table
 # Ensure callbacks are registered for this page
 import pages.wt_homologation_callbacks
 
@@ -97,7 +98,27 @@ layout = dbc.Container([
         dbc.Col([
             html.Div([
                 html.H5("Imported Runs"),
-                html.Div(id="imported-runs-list"),
+                html.Div(
+    dash_table.DataTable(
+        id="imported-runs-table",
+        columns=[
+            {"name": "Run", "id": "run"},
+            {"name": "Description", "id": "description"},
+            {"name": "Weighted Cz", "id": "weighted_Cz"},
+            {"name": "Weighted Cx", "id": "weighted_Cx"},
+            {"name": "Offset Cz", "id": "offset_Cz"},
+            {"name": "Offset Cx", "id": "offset_Cx"},
+            {"name": "Run Type", "id": "run_type"},
+            {"name": "Delete", "id": "delete", "presentation": "markdown"},
+        ],
+        data=[],
+        style_table={"overflowX": "auto"},
+        style_cell={"textAlign": "left", "minWidth": "100px", "maxWidth": "250px", "whiteSpace": "normal"},
+        style_header={"fontWeight": "bold", "backgroundColor": "#f5f5f5"},
+        page_size=20,
+    ),
+    id="imported-runs-list"
+),
             ], style={"padding": "10px", "border": "2px solid #888", "borderRadius": "8px", "background": "#fafbfc"})
         ], width=12),
     ], className="mb-3"),

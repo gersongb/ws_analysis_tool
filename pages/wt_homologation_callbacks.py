@@ -58,13 +58,32 @@ from dash.dependencies import ALL
     Output("wt-homologation-message-area", "children"),
     Input("current-homologation-store", "data"),
     Input({"type": "import-run-btn", "index": ALL}, "n_clicks"),
+    Input("imported-runs-table", "active_cell"),
+    State("imported-runs-table", "data"),
     State("import-message-store", "data"),
     prevent_initial_call=True
 )
-def update_imported_runs_list(homologation, n_clicks_list, last_message):
-    from dash import callback_context, no_update
+def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_data, last_message):
     import os
     ctx = callback_context
+    message = last_message
+    run_fields = []
+
+    # Handle delete icon click
+    if active_cell and active_cell.get("column_id") == "delete":
+        run_to_delete = table_data[active_cell["row"]]["run"]
+        h5_path = homologation.get("h5_path") if homologation else None
+        if h5_path and os.path.exists(h5_path):
+            with h5py.File(h5_path, "a") as h5f:
+                if "wt_runs" in h5f and run_to_delete in h5f["wt_runs"]:
+                    del h5f["wt_runs"][run_to_delete]
+                    message = f"Deleted run {run_to_delete}."
+                else:
+                    message = f"Run {run_to_delete} not found."
+        else:
+            message = "HDF5 file not found."
+        active_cell = None  # Prevent repeat deletion if callback is triggered again
+    # --- Load run_plot_config.json and set run_type_options at the top ---
     
 
     message = None
@@ -166,6 +185,7 @@ def update_imported_runs_list(homologation, n_clicks_list, last_message):
                                 "offset_Cz": get_attr("offset_Cz"),
                                 "offset_Cx": get_attr("offset_Cx"),
                                 "run_type": rt_value,
+                                "delete": f"[🗑️](delete://{run})"
                             })
                         run_fields = [
                             dash_table.DataTable(
@@ -178,6 +198,7 @@ def update_imported_runs_list(homologation, n_clicks_list, last_message):
                                     {"name": "Offset Cz", "id": "offset_Cz"},
                                     {"name": "Offset Cx", "id": "offset_Cx"},
                                     {"name": "Run Type", "id": "run_type"},
+                                    {"name": "Delete", "id": "delete", "presentation": "markdown"},
                                 ],
                                 data=table_data,
                                 style_table={"overflowX": "auto"},
@@ -198,15 +219,12 @@ def update_imported_runs_list(homologation, n_clicks_list, last_message):
     if h5_path:
         import os
         exists = os.path.exists(h5_path)
-        print(f"update_imported_runs_list: h5_path={h5_path!r}, exists={exists}")
         if not exists:
             print("update_imported_runs_list: HDF5 file does not exist!")
         try:
             with h5py.File(h5_path, "r") as h5f:
-                print(f"update_imported_runs_list: h5f keys={list(h5f.keys())}")
                 if "wt_runs" in h5f:
                     runs = list(h5f["wt_runs"].keys())
-                    print(f"update_imported_runs_list: found runs={runs}")
                     
                     table_data = []
                     for run in runs:
@@ -244,12 +262,14 @@ def update_imported_runs_list(homologation, n_clicks_list, last_message):
                             "offset_Cz": to_plain_type(get_attr("offset_Cz")),
                             "offset_Cx": to_plain_type(get_attr("offset_Cx")),
                             "run_type": to_plain_type(get_attr("run_type")),
+                            "delete": "[🗑️](delete://{})".format(to_plain_type(run)),
                         })
 
                     run_fields = [
                         dash_table.DataTable(
                             id="imported-runs-table",
                             columns=[
+                                {"name": "Delete", "id": "delete", "presentation": "markdown"},
                                 {"name": "Run", "id": "run"},
                                 {"name": "Description", "id": "description"},
                                 {"name": "Weighted Cz", "id": "weighted_Cz"},
@@ -271,13 +291,6 @@ def update_imported_runs_list(homologation, n_clicks_list, last_message):
                             page_size=20,
                         )
                     ]
-                    print("DEBUG: repr(table_data):")
-                    for row in table_data:
-                        print({k: v for k, v in row.items()})
-
-                    print("DEBUG: repr(run_type_options):")
-                    for opt in run_type_options:
-                        print(opt)
 
 
         except Exception as e:
