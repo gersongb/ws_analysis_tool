@@ -138,7 +138,7 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                     run_grp = wt_runs.create_group(folder_name)
                     d1_ds = run_grp.create_dataset("d1", data=d1)
                     d1_ds.attrs["columns"] = np.array(d1_colnames, dtype='S')
-                    d2_ds = run_grp.create_dataset("d2", data=d2, compression="gzip")
+                    d2_ds = run_grp.create_dataset("d2", data=d2)
                     d2_ds.attrs["columns"] = np.array(d2_colnames, dtype='S')
                     run_grp.attrs["description"] = "no description available"
                     run_grp.attrs["weighted_Cz"] = 0.0
@@ -156,15 +156,12 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
         run_fields = []
         if h5_path:
             exists = os.path.exists(h5_path)
-            print(f"update_imported_runs_list: h5_path={h5_path!r}, exists={exists}")
             if not exists:
                 print("update_imported_runs_list: HDF5 file does not exist!")
             try:
                 with h5py.File(h5_path, "r") as h5f:
-                    print(f"update_imported_runs_list: h5f keys={list(h5f.keys())}")
                     if "wt_runs" in h5f:
                         runs = list(h5f["wt_runs"].keys())
-                        print(f"update_imported_runs_list: found runs={runs}")
                         table_data = []
                         for run in runs:
                             run_attrs = h5f["wt_runs"][run].attrs
@@ -176,7 +173,6 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                             rt_value = get_attr("run_type")
                             if not rt_value and run_type_options:
                                 rt_value = run_type_options[0]
-                                print(f"update_imported_runs_list: run_type not found for {run}, using {rt_value}")
                             table_data.append({
                                 "run": run,
                                 "description": get_attr("description"),
@@ -198,7 +194,7 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                                     {"name": "Offset Cz", "id": "offset_Cz"},
                                     {"name": "Offset Cx", "id": "offset_Cx"},
                                     {"name": "Run Type", "id": "run_type"},
-                                    {"name": "Delete", "id": "delete", "presentation": "markdown"},
+                                    {"name": "Delete", "id": "delete", "presentation": "markdown"}
                                 ],
                                 data=table_data,
                                 style_table={"overflowX": "auto"},
@@ -269,7 +265,6 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                         dash_table.DataTable(
                             id="imported-runs-table",
                             columns=[
-                                {"name": "Delete", "id": "delete", "presentation": "markdown"},
                                 {"name": "Run", "id": "run"},
                                 {"name": "Description", "id": "description"},
                                 {"name": "Weighted Cz", "id": "weighted_Cz"},
@@ -277,6 +272,7 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                                 {"name": "Offset Cz", "id": "offset_Cz"},
                                 {"name": "Offset Cx", "id": "offset_Cx"},
                                 {"name": "Run Type", "id": "run_type", "presentation": "dropdown"},
+                                {"name": "Delete", "id": "delete", "presentation": "markdown"}
                             ],
                             data=table_data,
                             dropdown={
