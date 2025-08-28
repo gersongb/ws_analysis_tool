@@ -21,8 +21,14 @@ import pages.wt_homologation_callbacks
 # ---- Page Registration ----
 dash.register_page(__name__, path="/wt-homologation", name="WT Homologation")
 
-# Register this page with Dash
-dash.register_page(__name__, path="/wt-homologation", name="WT Homologation")
+# Load run_plot_config.json for dropdown options
+run_plot_config_path = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "config", "run_plot_config.json")
+)
+with open(run_plot_config_path, "r") as f:
+    run_plot_config = json.load(f)
+run_type_options = list(run_plot_config.keys())
+print(f"DEBUG Layout: run_type_options = {run_type_options}")
 
 # ---- Layout ----
 layout = dbc.Container([
@@ -99,27 +105,37 @@ layout = dbc.Container([
             html.Div([
                 html.H5("Imported Runs"),
                 html.Div(
-    dash_table.DataTable(
-        id="imported-runs-table",
-        columns=[
-            {"name": "Run", "id": "run"},
-            {"name": "Description", "id": "description"},
-            {"name": "Weighted Cz", "id": "weighted_Cz"},
-            {"name": "Weighted Cx", "id": "weighted_Cx"},
-            {"name": "Offset Cz", "id": "offset_Cz"},
-            {"name": "Offset Cx", "id": "offset_Cx"},
-            {"name": "Run Type", "id": "run_type"},
-            {"name": "Delete", "id": "delete", "presentation": "markdown"},
-        ],
-        data=[],
-        style_table={"overflowX": "auto"},
-        style_cell={"textAlign": "left", "minWidth": "100px", "maxWidth": "250px", "whiteSpace": "normal"},
-        style_header={"fontWeight": "bold", "backgroundColor": "#f5f5f5"},
-        page_size=20,
-    ),
-    id="imported-runs-list"
-),
-            ], style={"padding": "10px", "border": "2px solid #888", "borderRadius": "8px", "background": "#fafbfc"})
+                    id="imported-runs-list",
+                    children=[
+                        dash_table.DataTable(
+                            id="imported-runs-table",
+                            columns=[
+                                {"name": "Run", "id": "run", "editable": False},
+                                {"name": "Description", "id": "description", "editable": True},
+                                {"name": "Weighted Cz", "id": "weighted_Cz", "editable": False},
+                                {"name": "Weighted Cx", "id": "weighted_Cx", "editable": False},
+                                {"name": "Offset Cz", "id": "offset_Cz", "editable": True},
+                                {"name": "Offset Cx", "id": "offset_Cx", "editable": True},
+                                {"name": "Run Type", "id": "run_type", "editable": True, "presentation": "dropdown"},
+                                {"name": "", "id": "delete", "presentation": "markdown", "editable": False},
+                            ],
+                            data=[],
+                            editable=True,
+                            style_table={"overflowX": "auto"},
+                            style_cell={"textAlign": "left", "minWidth": "100px", "maxWidth": "250px", "whiteSpace": "normal"},
+                            style_cell_conditional=[
+                                {"if": {"column_id": "delete"}, "width": "10px", "minWidth": "10px", "maxWidth": "10px", "textAlign": "center", "padding": "0", "overflow": "hidden"}
+                            ],
+                            css=[
+                                {"selector": ".dash-cell.column-delete", "rule": "cursor: pointer; background: #ffeaea;"}
+                            ],
+                            style_header={"fontWeight": "bold", "backgroundColor": "#f5f5f5"},
+                            page_size=20,
+                        )
+                    ]
+                ),
+                
+            ], style={"padding": "10px", "border": "2px solid #888", "borderRadius": "8px", "background": "#fafbfc", "overflow": "visible"})
         ], width=12),
     ], className="mb-3"),
 

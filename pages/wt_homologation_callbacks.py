@@ -61,13 +61,67 @@ from dash.dependencies import ALL
     Input("imported-runs-table", "active_cell"),
     State("imported-runs-table", "data"),
     State("import-message-store", "data"),
-    prevent_initial_call=True
+    prevent_initial_call=False
 )
 def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_data, last_message):
     import os
     ctx = callback_context
     message = last_message
     run_fields = []
+
+    # If no homologation data, still render an empty table with dropdown options from app config
+    if not homologation:
+        app_config_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "config", "run_plot_config.json")
+        )
+        app_config = {}
+        if os.path.exists(app_config_path):
+            with open(app_config_path, "r") as f:
+                app_config = json.load(f)
+        run_type_options = list(app_config.keys())
+        run_fields = [
+            dash_table.DataTable(
+                id="imported-runs-table",
+                columns=[
+                    {"name": "Run", "id": "run", "editable": False},
+                    {"name": "Description", "id": "description", "editable": True},
+                    {"name": "Weighted Cz", "id": "weighted_Cz", "editable": False},
+                    {"name": "Weighted Cx", "id": "weighted_Cx", "editable": False},
+                    {"name": "Offset Cz", "id": "offset_Cz", "editable": True},
+                    {"name": "Offset Cx", "id": "offset_Cx", "editable": True},
+                    {"name": "Run Type", "id": "run_type", "presentation": "dropdown", "editable": True},
+                    {"name": "Delete", "id": "delete", "presentation": "markdown", "editable": False}
+                ],
+                data=[],
+                dropdown={
+                    "run_type": {
+                        "options": [{"label": opt, "value": opt} for opt in run_type_options],
+                        "clearable": True
+                    }
+                },
+                editable=True,
+                style_table={"overflowX": "auto", "overflowY": "visible"},
+                style_cell={"textAlign": "left", "minWidth": "100px", "maxWidth": "250px", "whiteSpace": "normal"},
+                style_cell_conditional=[
+                    {"if": {"column_id": "delete"}, "width": "10px", "minWidth": "10px", "maxWidth": "10px", "textAlign": "center", "padding": "0", "overflow": "hidden"}
+                ],
+                css=[
+                    {"selector": ".dash-cell.column-delete", "rule": "cursor: pointer; background: #ffeaea;"},
+                    {"selector": ".dash-cell > div", "rule": "overflow: visible !important;"},
+                    {"selector": ".Select-menu-outer", "rule": "display: block !important; z-index: 10000;"}
+                ],
+                style_header={"fontWeight": "bold", "backgroundColor": "#f5f5f5"},
+                row_selectable="single",
+                selected_rows=[],
+                page_size=20,
+            )
+        ]
+        return run_fields, (message or "Load a homologation to see runs.")
+
+    # Ignore non-delete cell clicks to allow inline editing without rerendering the table
+    if ctx.triggered and len(ctx.triggered) == 1 and ctx.triggered[0]["prop_id"] == "imported-runs-table.active_cell":
+        if not active_cell or active_cell.get("column_id") != "delete":
+            return no_update, message
 
     # Handle delete icon click
     if active_cell and active_cell.get("column_id") == "delete":
@@ -88,18 +142,25 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
 
     message = None
     # --- Load run_plot_config.json and set run_type_options at the top ---
-    run_plot_config_path = None
+    # Merge app-level config (defaults) with reference-folder config (overrides/extra)
+    app_config_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "config", "run_plot_config.json")
+    )
+    app_config = {}
+    if os.path.exists(app_config_path):
+        with open(app_config_path, "r") as f:
+            app_config = json.load(f)
+
+    ref_config = {}
     if homologation and "reference_folder" in homologation:
         config_dst_dir = os.path.join(homologation["reference_folder"], "config")
         candidate = os.path.join(config_dst_dir, "run_plot_config.json")
         if os.path.exists(candidate):
-            run_plot_config_path = candidate
-    if not run_plot_config_path:
-        run_plot_config_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "config", "run_plot_config.json")
-        )
-    with open(run_plot_config_path, "r") as f:
-        run_plot_config = json.load(f)
+            with open(candidate, "r") as f:
+                ref_config = json.load(f)
+
+    # Merge with reference taking precedence for duplicate keys
+    run_plot_config = {**app_config, **ref_config}
     run_type_options = list(run_plot_config.keys())
     # --- END run_plot_config.json loading ---
 
@@ -171,8 +232,9 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                                     v = v.decode()
                                 return v
                             rt_value = get_attr("run_type")
-                            if not rt_value and run_type_options:
-                                rt_value = run_type_options[0]
+                            # Ensure selected value is valid and present in the dropdown options
+                            if (not rt_value) or (run_type_options and rt_value not in run_type_options):
+                                rt_value = run_type_options[0] if run_type_options else ""
                             table_data.append({
                                 "run": run,
                                 "description": get_attr("description"),
@@ -181,25 +243,42 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                                 "offset_Cz": get_attr("offset_Cz"),
                                 "offset_Cx": get_attr("offset_Cx"),
                                 "run_type": rt_value,
-                                "delete": f"[🗑️](delete://{run})"
+                                "delete": "🗑️"
                             })
                         run_fields = [
                             dash_table.DataTable(
                                 id="imported-runs-table",
                                 columns=[
-                                    {"name": "Run", "id": "run"},
-                                    {"name": "Description", "id": "description"},
-                                    {"name": "Weighted Cz", "id": "weighted_Cz"},
-                                    {"name": "Weighted Cx", "id": "weighted_Cx"},
-                                    {"name": "Offset Cz", "id": "offset_Cz"},
-                                    {"name": "Offset Cx", "id": "offset_Cx"},
-                                    {"name": "Run Type", "id": "run_type"},
-                                    {"name": "Delete", "id": "delete", "presentation": "markdown"}
+                                    {"name": "Run", "id": "run", "editable": False},
+                                    {"name": "Description", "id": "description", "editable": True},
+                                    {"name": "Weighted Cz", "id": "weighted_Cz", "editable": False},
+                                    {"name": "Weighted Cx", "id": "weighted_Cx", "editable": False},
+                                    {"name": "Offset Cz", "id": "offset_Cz", "editable": True},
+                                    {"name": "Offset Cx", "id": "offset_Cx", "editable": True},
+                                    {"name": "Run Type", "id": "run_type", "presentation": "dropdown", "editable": True},
+                                    {"name": "Delete", "id": "delete", "presentation": "markdown", "editable": False}
                                 ],
                                 data=table_data,
-                                style_table={"overflowX": "auto"},
+                                dropdown={
+                                    "run_type": {
+                                        "options": [{"label": opt, "value": opt} for opt in run_type_options],
+                                        "clearable": True
+                                    }
+                                },
+                                editable=True,
+                                style_table={"overflowX": "auto", "overflowY": "visible"},
                                 style_cell={"textAlign": "left", "minWidth": "100px", "maxWidth": "250px", "whiteSpace": "normal"},
+                                style_cell_conditional=[
+                                    {"if": {"column_id": "delete"}, "width": "10px", "minWidth": "10px", "maxWidth": "10px", "textAlign": "center", "padding": "0", "overflow": "hidden"}
+                                ],
+                                css=[
+                                    {"selector": ".dash-cell.column-delete", "rule": "cursor: pointer; background: #ffeaea;"},
+                                    {"selector": ".dash-cell > div", "rule": "overflow: visible !important;"},
+                                    {"selector": ".Select-menu-outer", "rule": "display: block !important; z-index: 10000;"}
+                                ],
                                 style_header={"fontWeight": "bold", "backgroundColor": "#f5f5f5"},
+                                row_selectable="single",
+                                selected_rows=[],
                                 page_size=20,
                             )
                         ]
@@ -250,6 +329,11 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                                     return v
                                 return v
                             return val
+                        # Validate run_type value
+                        rt_value = to_plain_type(get_attr("run_type"))
+                        if (not rt_value) or (run_type_options and rt_value not in run_type_options):
+                            rt_value = run_type_options[0] if run_type_options else ""
+
                         table_data.append({
                             "run": to_plain_type(run),
                             "description": to_plain_type(get_attr("description")),
@@ -257,33 +341,44 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                             "weighted_Cx": to_plain_type(get_attr("weighted_Cx")),
                             "offset_Cz": to_plain_type(get_attr("offset_Cz")),
                             "offset_Cx": to_plain_type(get_attr("offset_Cx")),
-                            "run_type": to_plain_type(get_attr("run_type")),
-                            "delete": "[🗑️](delete://{})".format(to_plain_type(run)),
+                            "run_type": rt_value,
+                            "delete": "🗑️",
                         })
 
                     run_fields = [
                         dash_table.DataTable(
                             id="imported-runs-table",
                             columns=[
-                                {"name": "Run", "id": "run"},
-                                {"name": "Description", "id": "description"},
-                                {"name": "Weighted Cz", "id": "weighted_Cz"},
-                                {"name": "Weighted Cx", "id": "weighted_Cx"},
-                                {"name": "Offset Cz", "id": "offset_Cz"},
-                                {"name": "Offset Cx", "id": "offset_Cx"},
-                                {"name": "Run Type", "id": "run_type", "presentation": "dropdown"},
-                                {"name": "Delete", "id": "delete", "presentation": "markdown"}
+                                {"name": "Run", "id": "run", "editable": False},
+                                {"name": "Description", "id": "description", "editable": True},
+                                {"name": "Weighted Cz", "id": "weighted_Cz", "editable": False},
+                                {"name": "Weighted Cx", "id": "weighted_Cx", "editable": False},
+                                {"name": "Offset Cz", "id": "offset_Cz", "editable": True},
+                                {"name": "Offset Cx", "id": "offset_Cx", "editable": True},
+                                {"name": "Run Type", "id": "run_type", "presentation": "dropdown", "editable": True},
+                                {"name": "Delete", "id": "delete", "presentation": "markdown", "editable": False}
                             ],
                             data=table_data,
                             dropdown={
                                 "run_type": {
-                                    "options": [{"label": opt, "value": opt} for opt in run_type_options]
+                                    "options": [{"label": opt, "value": opt} for opt in run_type_options],
+                                    "clearable": True
                                 }
                             },
                             editable=True,
-                            style_table={"overflowX": "auto"},
+                            style_table={"overflowX": "auto", "overflowY": "visible"},
                             style_cell={"textAlign": "left", "minWidth": "100px", "maxWidth": "250px", "whiteSpace": "normal"},
+                            style_cell_conditional=[
+                                {"if": {"column_id": "delete"}, "width": "10px", "minWidth": "10px", "maxWidth": "10px", "textAlign": "center", "padding": "0", "overflow": "hidden"}
+                            ],
+                            css=[
+                                {"selector": ".dash-cell.column-delete", "rule": "cursor: pointer; background: #ffeaea;"},
+                                {"selector": ".dash-cell > div", "rule": "overflow: visible !important;"},
+                                {"selector": ".Select-menu-outer", "rule": "display: block !important; z-index: 10000;"}
+                            ],
                             style_header={"fontWeight": "bold", "backgroundColor": "#f5f5f5"},
+                            row_selectable="single",
+                            selected_rows=[],
                             page_size=20,
                         )
                     ]
@@ -292,4 +387,44 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
         except Exception as e:
             last_message = f"Error: {e}"
  
-    return run_fields, last_message
+    return run_fields, (last_message if last_message else "")
+
+
+# Callback to handle table data changes and save to HDF5
+@dash.callback(
+    Output("import-message-store", "data"),
+    Input("imported-runs-table", "data"),
+    State("current-homologation-store", "data"),
+    prevent_initial_call=True
+)
+def save_table_changes(table_data, homologation):
+    if not table_data or not homologation:
+        return no_update
+    
+    h5_path = homologation.get("h5_path")
+    if not h5_path or not os.path.exists(h5_path):
+        return "HDF5 file not found"
+    
+    try:
+        with h5py.File(h5_path, "a") as h5f:
+            if "wt_runs" not in h5f:
+                return "No runs found in HDF5 file"
+            
+            for row in table_data:
+                run_name = row.get("run")
+                if run_name and run_name in h5f["wt_runs"]:
+                    run_grp = h5f["wt_runs"][run_name]
+                    
+                    # Update attributes from table data
+                    run_grp.attrs["description"] = str(row.get("description", ""))
+                    run_grp.attrs["weighted_Cz"] = float(row.get("weighted_Cz", 0.0))
+                    run_grp.attrs["weighted_Cx"] = float(row.get("weighted_Cx", 0.0))
+                    run_grp.attrs["offset_Cz"] = float(row.get("offset_Cz", 0.0))
+                    run_grp.attrs["offset_Cx"] = float(row.get("offset_Cx", 0.0))
+                    run_grp.attrs["run_type"] = str(row.get("run_type", ""))
+        
+        return "Changes saved successfully"
+    except Exception as e:
+        return f"Error saving changes: {e}"
+
+ 

@@ -1,0 +1,30 @@
+/* Target the last column of the DataTable for pointer cursor */
+.dash-table-container .dash-cell.column-delete,
+.dash-table-container .dash-cell[data-dash-column="delete"] {
+    cursor: pointer !important;
+}
+.dash-table-container .dash-cell.column-delete:hover,
+.dash-table-container .dash-cell[data-dash-column="delete"]:hover {
+    background: #ffeaea !important;
+    cursor: pointer !important;
+}
+
+/* Ensure dropdowns inside Dash DataTable are not clipped and appear on top */
+.dash-table-container {
+    overflow: visible !important;
+}
+.dash-table-container .dash-cell > div {
+    overflow: visible !important;
+}
+/* react-select v1 */
+.Select-menu-outer {
+    display: block !important;
+    z-index: 10000 !important;
+}
+.Select-menu {
+    display: block !important;
+    z-index: 10000 !important;
+}
+.Select-control {
+    z-index: 10000 !important;
+}
