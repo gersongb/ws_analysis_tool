@@ -13,6 +13,10 @@
 .dash-table-container {
     overflow: visible !important;
 }
+.dash-table-container .dash-spreadsheet-container,
+.dash-table-container .dash-spreadsheet-inner {
+    overflow: visible !important;
+}
 .dash-table-container .dash-cell > div {
     overflow: visible !important;
 }
@@ -20,11 +24,40 @@
 .Select-menu-outer {
     display: block !important;
     z-index: 10000 !important;
+    background: #ffffff !important;
+    border: 1px solid #c9c9c9 !important;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.15) !important;
+    max-height: 340px !important; /* more options before scrolling */
 }
 .Select-menu {
     display: block !important;
     z-index: 10000 !important;
+    background: #ffffff !important;
+    max-height: 340px !important;
 }
 .Select-control {
     z-index: 10000 !important;
+    background: #ffffff !important;
+    border: 1px solid #c9c9c9 !important;
+}
+
+/* Option styling for react-select v1 */
+.Select-option {
+    background: #ffffff !important;
+    color: #222 !important;
+}
+.Select-option.is-focused {
+    background: #f2f7ff !important; /* subtle blue focus */
+}
+.Select-option.is-selected {
+    background: #e6f0ff !important;
+    font-weight: 600 !important;
+}
+
+/* In case virtualization is used */
+.VirtualizedSelectOption {
+    background: #ffffff !important;
+}
+.VirtualizedSelectFocusedOption {
+    background: #f2f7ff !important;
 }

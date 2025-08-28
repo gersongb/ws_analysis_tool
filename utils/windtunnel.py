@@ -132,7 +132,7 @@ class WeightedData:
         # Multiply the Cx column by weights['Cx']:
         results['Cx_weighted'] = results['Merit_Cx']*weights['Cx']
 
-        print(results['Cx_weighted'])
+        # Removed debug print: results['Cx_weighted']
 
         SCz = results['Cz_weighted'].sum()
         SCzf = results['Czf_weighted'].sum()

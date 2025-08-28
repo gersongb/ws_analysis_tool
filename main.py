@@ -6,8 +6,8 @@ import sys
 
 
 def main():
-    print("Welcome to ws_analysis_tool!")
     # Add your main logic here
+    pass
 
 
 if __name__ == "__main__":

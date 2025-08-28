@@ -101,9 +101,23 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                 },
                 editable=True,
                 style_table={"overflowX": "auto", "overflowY": "visible"},
-                style_cell={"textAlign": "left", "minWidth": "100px", "maxWidth": "250px", "whiteSpace": "normal"},
+                style_cell={
+                    "textAlign": "left",
+                    "minWidth": "60px",
+                    "maxWidth": "220px",
+                    "whiteSpace": "normal",
+                    "fontSize": "12px",
+                    "padding": "6px"
+                },
                 style_cell_conditional=[
-                    {"if": {"column_id": "delete"}, "width": "10px", "minWidth": "10px", "maxWidth": "10px", "textAlign": "center", "padding": "0", "overflow": "hidden"}
+                    {"if": {"column_id": "run"}, "width": "120px"},
+                    {"if": {"column_id": "description"}, "width": "35%", "maxWidth": "380px"},
+                    {"if": {"column_id": "weighted_Cz"}, "width": "90px", "textAlign": "center"},
+                    {"if": {"column_id": "weighted_Cx"}, "width": "90px", "textAlign": "center"},
+                    {"if": {"column_id": "offset_Cz"}, "width": "90px", "textAlign": "center"},
+                    {"if": {"column_id": "offset_Cx"}, "width": "90px", "textAlign": "center"},
+                    {"if": {"column_id": "run_type"}, "width": "160px"},
+                    {"if": {"column_id": "delete"}, "width": "36px", "minWidth": "36px", "maxWidth": "36px", "textAlign": "center", "padding": "0", "overflow": "hidden"}
                 ],
                 css=[
                     {"selector": ".dash-cell.column-delete", "rule": "cursor: pointer; background: #ffeaea;"},
@@ -111,8 +125,10 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                     {"selector": ".Select-menu-outer", "rule": "display: block !important; z-index: 10000;"}
                 ],
                 style_header={"fontWeight": "bold", "backgroundColor": "#f5f5f5"},
-                row_selectable="single",
-                selected_rows=[],
+                style_header_conditional=[
+                    {"if": {"column_id": c}, "textAlign": "center"}
+                    for c in ["weighted_Cz", "weighted_Cx", "offset_Cz", "offset_Cx", "delete"]
+                ],
                 page_size=20,
             )
         ]
@@ -218,7 +234,7 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
         if h5_path:
             exists = os.path.exists(h5_path)
             if not exists:
-                print("update_imported_runs_list: HDF5 file does not exist!")
+                pass
             try:
                 with h5py.File(h5_path, "r") as h5f:
                     if "wt_runs" in h5f:
@@ -267,9 +283,23 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                                 },
                                 editable=True,
                                 style_table={"overflowX": "auto", "overflowY": "visible"},
-                                style_cell={"textAlign": "left", "minWidth": "100px", "maxWidth": "250px", "whiteSpace": "normal"},
+                                style_cell={
+                                    "textAlign": "left",
+                                    "minWidth": "60px",
+                                    "maxWidth": "220px",
+                                    "whiteSpace": "normal",
+                                    "fontSize": "12px",
+                                    "padding": "6px"
+                                },
                                 style_cell_conditional=[
-                                    {"if": {"column_id": "delete"}, "width": "10px", "minWidth": "10px", "maxWidth": "10px", "textAlign": "center", "padding": "0", "overflow": "hidden"}
+                                    {"if": {"column_id": "run"}, "width": "120px"},
+                                    {"if": {"column_id": "description"}, "width": "35%", "maxWidth": "380px"},
+                                    {"if": {"column_id": "weighted_Cz"}, "width": "90px", "textAlign": "center"},
+                                    {"if": {"column_id": "weighted_Cx"}, "width": "90px", "textAlign": "center"},
+                                    {"if": {"column_id": "offset_Cz"}, "width": "90px", "textAlign": "center"},
+                                    {"if": {"column_id": "offset_Cx"}, "width": "90px", "textAlign": "center"},
+                                    {"if": {"column_id": "run_type"}, "width": "160px"},
+                                    {"if": {"column_id": "delete"}, "width": "36px", "minWidth": "36px", "maxWidth": "36px", "textAlign": "center", "padding": "0", "overflow": "hidden"}
                                 ],
                                 css=[
                                     {"selector": ".dash-cell.column-delete", "rule": "cursor: pointer; background: #ffeaea;"},
@@ -277,8 +307,10 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                                     {"selector": ".Select-menu-outer", "rule": "display: block !important; z-index: 10000;"}
                                 ],
                                 style_header={"fontWeight": "bold", "backgroundColor": "#f5f5f5"},
-                                row_selectable="single",
-                                selected_rows=[],
+                                style_header_conditional=[
+                                    {"if": {"column_id": c}, "textAlign": "center"}
+                                    for c in ["weighted_Cz", "weighted_Cx", "offset_Cz", "offset_Cx", "delete"]
+                                ],
                                 page_size=20,
                             )
                         ]
@@ -295,7 +327,7 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
         import os
         exists = os.path.exists(h5_path)
         if not exists:
-            print("update_imported_runs_list: HDF5 file does not exist!")
+            pass
         try:
             with h5py.File(h5_path, "r") as h5f:
                 if "wt_runs" in h5f:
@@ -367,9 +399,23 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                             },
                             editable=True,
                             style_table={"overflowX": "auto", "overflowY": "visible"},
-                            style_cell={"textAlign": "left", "minWidth": "100px", "maxWidth": "250px", "whiteSpace": "normal"},
+                            style_cell={
+                                "textAlign": "left",
+                                "minWidth": "60px",
+                                "maxWidth": "220px",
+                                "whiteSpace": "normal",
+                                "fontSize": "12px",
+                                "padding": "6px"
+                            },
                             style_cell_conditional=[
-                                {"if": {"column_id": "delete"}, "width": "10px", "minWidth": "10px", "maxWidth": "10px", "textAlign": "center", "padding": "0", "overflow": "hidden"}
+                                {"if": {"column_id": "run"}, "width": "120px"},
+                                {"if": {"column_id": "description"}, "width": "35%", "maxWidth": "380px"},
+                                {"if": {"column_id": "weighted_Cz"}, "width": "90px", "textAlign": "center"},
+                                {"if": {"column_id": "weighted_Cx"}, "width": "90px", "textAlign": "center"},
+                                {"if": {"column_id": "offset_Cz"}, "width": "90px", "textAlign": "center"},
+                                {"if": {"column_id": "offset_Cx"}, "width": "90px", "textAlign": "center"},
+                                {"if": {"column_id": "run_type"}, "width": "160px"},
+                                {"if": {"column_id": "delete"}, "width": "36px", "minWidth": "36px", "maxWidth": "36px", "textAlign": "center", "padding": "0", "overflow": "hidden"}
                             ],
                             css=[
                                 {"selector": ".dash-cell.column-delete", "rule": "cursor: pointer; background: #ffeaea;"},
@@ -377,8 +423,10 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                                 {"selector": ".Select-menu-outer", "rule": "display: block !important; z-index: 10000;"}
                             ],
                             style_header={"fontWeight": "bold", "backgroundColor": "#f5f5f5"},
-                            row_selectable="single",
-                            selected_rows=[],
+                            style_header_conditional=[
+                                {"if": {"column_id": c}, "textAlign": "center"}
+                                for c in ["weighted_Cz", "weighted_Cx", "offset_Cz", "offset_Cx", "delete"]
+                            ],
                             page_size=20,
                         )
                     ]

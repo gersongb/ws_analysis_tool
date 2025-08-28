@@ -28,7 +28,6 @@ run_plot_config_path = os.path.abspath(
 with open(run_plot_config_path, "r") as f:
     run_plot_config = json.load(f)
 run_type_options = list(run_plot_config.keys())
-print(f"DEBUG Layout: run_type_options = {run_type_options}")
 
 # ---- Layout ----
 layout = dbc.Container([
@@ -121,21 +120,46 @@ layout = dbc.Container([
                             ],
                             data=[],
                             editable=True,
-                            style_table={"overflowX": "auto"},
-                            style_cell={"textAlign": "left", "minWidth": "100px", "maxWidth": "250px", "whiteSpace": "normal"},
+                            style_table={"overflowX": "auto", "overflowY": "visible"},
+                            style_cell={
+                                "textAlign": "left",
+                                "minWidth": "60px",
+                                "maxWidth": "220px",
+                                "whiteSpace": "normal",
+                                "fontSize": "12px",
+                                "padding": "6px"
+                            },
                             style_cell_conditional=[
-                                {"if": {"column_id": "delete"}, "width": "10px", "minWidth": "10px", "maxWidth": "10px", "textAlign": "center", "padding": "0", "overflow": "hidden"}
+                                {"if": {"column_id": "run"}, "width": "120px"},
+                                {"if": {"column_id": "description"}, "width": "35%", "maxWidth": "380px"},
+                                {"if": {"column_id": "weighted_Cz"}, "width": "90px", "textAlign": "center"},
+                                {"if": {"column_id": "weighted_Cx"}, "width": "90px", "textAlign": "center"},
+                                {"if": {"column_id": "offset_Cz"}, "width": "90px", "textAlign": "center"},
+                                {"if": {"column_id": "offset_Cx"}, "width": "90px", "textAlign": "center"},
+                                {"if": {"column_id": "run_type"}, "width": "160px"},
+                                {"if": {"column_id": "delete"}, "width": "36px", "minWidth": "36px", "maxWidth": "36px", "textAlign": "center", "padding": "0", "overflow": "hidden"}
                             ],
                             css=[
                                 {"selector": ".dash-cell.column-delete", "rule": "cursor: pointer; background: #ffeaea;"}
                             ],
                             style_header={"fontWeight": "bold", "backgroundColor": "#f5f5f5"},
+                            style_header_conditional=[
+                                {"if": {"column_id": c}, "textAlign": "center"}
+                                for c in ["weighted_Cz", "weighted_Cx", "offset_Cz", "offset_Cx", "delete"]
+                            ],
                             page_size=20,
                         )
                     ]
                 ),
                 
-            ], style={"padding": "10px", "border": "2px solid #888", "borderRadius": "8px", "background": "#fafbfc", "overflow": "visible"})
+            ], style={
+                "padding": "10px",
+                "border": "2px solid #888",
+                "borderRadius": "8px",
+                "background": "#fafbfc",
+                "overflow": "visible",
+                "minHeight": "460px"
+            })
         ], width=12),
     ], className="mb-3"),
 
