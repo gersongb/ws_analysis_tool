@@ -1,0 +1,13 @@
+{
+  "manufacturer": "Cadillac",
+  "homologation_date": "2025-10-10",
+  "session_name": "Cadillac_10-2025_windshear_GGB",
+  "name_identifier": "GGB",
+  "base_folder": "C:\\Users\\g.garsed\\Documents\\wt_tool_testing",
+  "reference_folder": "C:\\Users\\g.garsed\\Documents\\wt_tool_testing\\Cadillac_10-2025_windshear_GGB",
+  "wt_maps": "C:\\Users\\g.garsed\\Documents\\wt_tool_testing\\Cadillac_10-2025_windshear_GGB\\wt_maps",
+  "data": "C:\\Users\\g.garsed\\Documents\\wt_tool_testing\\Cadillac_10-2025_windshear_GGB\\data",
+  "data_source_folder": "C:\\Users\\g.garsed\\Documents\\wt_tool_testing\\data_souce",
+  "wind_tunnel": "windshear",
+  "h5_path": "C:\\Users\\g.garsed\\Documents\\wt_tool_testing\\Cadillac_10-2025_windshear_GGB\\data\\Cadillac_10-2025_windshear_GGB.h5"
+}
