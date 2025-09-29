@@ -9,6 +9,109 @@ import json
 from dash import no_update
 from dash import dash_table
 
+# ---- Unit Conversion Constants (Wind Tunnel) ----
+# Pressure: pounds per square foot (psf) to Pascal (Pa)
+PSF_TO_PA = 47.88125
+# Force: pound-force (lbf) to Newton (N)
+LBF_TO_NEWTONS = 4.44822
+
+def _get_attr_str(arr):
+    return [v.decode() if isinstance(v, (bytes, bytearray)) else v for v in arr]
+
+def compute_weighted_coeffs_from_d1_processed(run_grp):
+    """Compute weighted_Cz and weighted_Cx based on d1_processed dataset and store as run attributes.
+
+    Given:
+    - drag_tare = D value at setpoint == 'ZeroD1'
+    - lift_tare = L value at setpoint == 'ZeroL'
+    - CLW = (L - lift_tare) * LBF_TO_NEWTONS * w_cz / (DYNPR * PSF_TO_PA)
+      weighted_Cz = sum(CLW)
+    - CDW = (D - drag_tare) * LBF_TO_NEWTONS * w_cx / (DYNPR * PSF_TO_PA)
+      weighted_Cx = sum(CDW)
+    """
+    try:
+        if "d1_processed" not in run_grp:
+            return False, "d1_processed not found"
+        ds = run_grp["d1_processed"]
+        data = ds[:]
+        cols = []
+        if "columns" in ds.attrs:
+            cols = _get_attr_str(ds.attrs["columns"])
+        if not cols or data.size == 0:
+            return False, "d1_processed has no data or columns"
+
+        # Resolve indices (case-insensitive)
+        sp_idx = _find_col_index('setpoint', cols)
+        L_idx = _find_col_index('L', cols)
+        D_idx = _find_col_index('D', cols)
+        DYNPR_idx = _find_col_index('DYNPR', cols)
+        wcz_idx = _find_col_index('w_cz', cols)
+        wcx_idx = _find_col_index('w_cx', cols)
+
+        for required_name, idx in [("setpoint", sp_idx), ("L", L_idx), ("DYNPR", DYNPR_idx), ("w_cz", wcz_idx)]:
+            if idx == -1:
+                return False, f"Missing required column '{required_name}' in d1_processed"
+
+        # Helper to read cell as float when possible
+        def to_float(x):
+            try:
+                # Handle bytes and numpy types
+                if isinstance(x, (bytes, bytearray)):
+                    x = x.decode()
+                return float(x)
+            except Exception:
+                return float('nan')
+
+        # Find tares
+        drag_tare = float('nan')
+        lift_tare = float('nan')
+        for r in range(data.shape[0]):
+            sp_val = data[r, sp_idx]
+            if isinstance(sp_val, (bytes, bytearray)):
+                sp_val = sp_val.decode()
+            if str(sp_val) == 'ZeroD1' and D_idx != -1:
+                drag_tare = to_float(data[r, D_idx])
+            if str(sp_val) == 'ZeroL':
+                lift_tare = to_float(data[r, L_idx])
+        # Compute CLW and CDW, accumulate sums and sum of weights
+        clw_sum = 0.0
+        cdw_sum = 0.0
+        wcz_sum = 0.0
+        wcx_sum = 0.0
+        for r in range(data.shape[0]):
+            L = to_float(data[r, L_idx])
+            D = to_float(data[r, D_idx]) if D_idx != -1 else float('nan')
+            dynpr = to_float(data[r, DYNPR_idx])
+            wcz = to_float(data[r, wcz_idx])
+            wcx = to_float(data[r, wcx_idx]) if wcx_idx != -1 else float('nan')
+            if np.isnan(L) or np.isnan(lift_tare) or np.isnan(dynpr) or np.isnan(wcz) or dynpr == 0:
+                continue
+            clw = (L - lift_tare) * LBF_TO_NEWTONS * wcz / (dynpr * PSF_TO_PA)
+            if not np.isnan(clw):
+                clw_sum += clw
+                if not np.isnan(wcz):
+                    wcz_sum += wcz
+            # CDW part requires D, drag_tare and w_cx
+            if not np.isnan(D) and not np.isnan(drag_tare) and not np.isnan(wcx) and dynpr != 0:
+                cdw = (D - drag_tare) * LBF_TO_NEWTONS * wcx / (dynpr * PSF_TO_PA)
+                if not np.isnan(cdw):
+                    cdw_sum += cdw
+                    wcx_sum += wcx
+        # Final weighted values are normalized by the sum of weights
+        weighted_cz = float(clw_sum / wcz_sum) if wcz_sum not in (0.0, float('nan')) else 0.0
+        weighted_cx = float(cdw_sum / wcx_sum) if wcx_sum not in (0.0, float('nan')) else 0.0
+
+        run_grp.attrs["weighted_Cz"] = weighted_cz
+        run_grp.attrs["weighted_Cx"] = weighted_cx
+        try:
+            run_name = run_grp.name.split('/')[-1]
+        except Exception:
+            run_name = str(run_grp)
+        print(f"[WT] Run '{run_name}': weighted_Cz={weighted_cz:.6f}, weighted_Cx={weighted_cx:.6f}")
+        return True, ""
+    except Exception as e:
+        return False, f"Error computing weighted coeffs: {e}"
+
 def load_setpoints_from_map(map_name):
     """Load full setpoint data from the specified map in maps.json"""
     try:
@@ -93,6 +196,9 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
         # Define the d1 columns we want to append
         d1_columns_to_append = ["D", "L", "LF", "LR", "DYNPR", "Tunnel_Air_Temp", "Relative_Humidity"]
         
+        # Add calculated columns for CLW and CDW
+        calculated_columns = ["CLW", "CDW"]
+        
         # Debug: Print column information
         print(f"Available d1 columns: {d1_columns}")
         print(f"d1_data shape: {np.array(d1_data).shape if len(d1_data) > 0 else 'empty'}")
@@ -108,8 +214,8 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
             else:
                 print(f"Column {col} not found in d1_columns")
         
-        # Combine map columns with d1 columns
-        combined_columns = map_columns + d1_columns_to_append
+        # Combine map columns with d1 columns and calculated columns
+        combined_columns = map_columns + d1_columns_to_append + calculated_columns
         
         # Create combined data
         combined_data = []
@@ -157,6 +263,36 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
                             pass
                     per_setpoint_values[sp_name] = vals
 
+        # Find tare values for CLW/CDW calculations
+        drag_tare = 0.0
+        lift_tare = 0.0
+        
+        # Helper function to safely convert to float
+        def to_float(x):
+            try:
+                if isinstance(x, (bytes, bytearray)):
+                    x = x.decode()
+                return float(x)
+            except Exception:
+                return float('nan')
+        
+        # Look for tare values in per_setpoint_values or d1_data
+        if per_setpoint_values:
+            if 'ZeroD1' in per_setpoint_values and 'D' in per_setpoint_values['ZeroD1']:
+                drag_tare = per_setpoint_values['ZeroD1']['D']
+            if 'ZeroL' in per_setpoint_values and 'L' in per_setpoint_values['ZeroL']:
+                lift_tare = per_setpoint_values['ZeroL']['L']
+        else:
+            # Fallback: look through setpoints_data for ZeroD1/ZeroL
+            sp_col_idx = _find_col_index('setpoint', map_columns)
+            if sp_col_idx != -1:
+                for i, sp_row in enumerate(setpoints_data):
+                    sp_name = sp_row[sp_col_idx]
+                    if str(sp_name) == 'ZeroD1' and 'D' in d1_column_indices and i < len(d1_data):
+                        drag_tare = to_float(d1_data[i][d1_column_indices['D']])
+                    if str(sp_name) == 'ZeroL' and 'L' in d1_column_indices and i < len(d1_data):
+                        lift_tare = to_float(d1_data[i][d1_column_indices['L']])
+
         for i, setpoint_row in enumerate(setpoints_data):
             combined_row = setpoint_row.copy()
 
@@ -180,6 +316,55 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
                         val_str = str(d1_data[row_index][col_index])
                         used = True
                 combined_row.append(val_str)
+
+            # Calculate CLW and CDW for this row
+            clw_val = ""
+            cdw_val = ""
+            
+            try:
+                # Get values needed for calculations
+                L = 0.0
+                D = 0.0
+                dynpr = 0.0
+                wcz = 0.0
+                wcx = 0.0
+                
+                # Extract L, D, DYNPR from the row we just built
+                if sp_name is not None and sp_name in per_setpoint_values:
+                    L = per_setpoint_values[sp_name].get('L', 0.0)
+                    D = per_setpoint_values[sp_name].get('D', 0.0)
+                    dynpr = per_setpoint_values[sp_name].get('DYNPR', 0.0)
+                elif 'L' in d1_column_indices and 'D' in d1_column_indices and 'DYNPR' in d1_column_indices and i < len(d1_data):
+                    row_index = min(i, len(d1_data) - 1)
+                    L = to_float(d1_data[row_index][d1_column_indices['L']])
+                    D = to_float(d1_data[row_index][d1_column_indices['D']])
+                    dynpr = to_float(d1_data[row_index][d1_column_indices['DYNPR']])
+                
+                # Extract w_cz and w_cx from map setpoint
+                wcz_idx = _find_col_index('w_cz', map_columns)
+                wcx_idx = _find_col_index('w_cx', map_columns)
+                if wcz_idx != -1:
+                    wcz = to_float(setpoint_row[wcz_idx])
+                if wcx_idx != -1:
+                    wcx = to_float(setpoint_row[wcx_idx])
+                
+                # Calculate CLW and CDW
+                if not np.isnan(L) and not np.isnan(lift_tare) and not np.isnan(dynpr) and not np.isnan(wcz) and dynpr != 0:
+                    clw = (L - lift_tare) * LBF_TO_NEWTONS * wcz / (dynpr * PSF_TO_PA)
+                    if not np.isnan(clw):
+                        clw_val = f"{clw:.6f}"
+                
+                if not np.isnan(D) and not np.isnan(drag_tare) and not np.isnan(dynpr) and not np.isnan(wcx) and dynpr != 0:
+                    cdw = (D - drag_tare) * LBF_TO_NEWTONS * wcx / (dynpr * PSF_TO_PA)
+                    if not np.isnan(cdw):
+                        cdw_val = f"{cdw:.6f}"
+                        
+            except Exception as e:
+                print(f"Error calculating CLW/CDW for row {i}: {e}")
+            
+            # Append calculated values
+            combined_row.append(clw_val)
+            combined_row.append(cdw_val)
 
             combined_data.append(combined_row)
         
@@ -239,11 +424,11 @@ from dash.dependencies import ALL
     Input("current-homologation-store", "data"),
     Input({"type": "import-run-btn", "index": ALL}, "n_clicks"),
     Input("imported-runs-table", "active_cell"),
+    Input("import-message-store", "data"),
     State("imported-runs-table", "data"),
-    State("import-message-store", "data"),
     prevent_initial_call=False
 )
-def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_data, last_message):
+def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_message, table_data):
     import os
     ctx = callback_context
     message = last_message
@@ -419,13 +604,22 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                     run_grp = wt_runs.create_group(folder_name)
                     d1_ds = run_grp.create_dataset("d1", data=d1)
                     d1_ds.attrs["columns"] = np.array(d1_colnames, dtype='S')
+                    # Store conversion constants on datasets for downstream processing
+                    d1_ds.attrs["PSF_to_Pa"] = PSF_TO_PA
+                    d1_ds.attrs["LBF_to_Newtons"] = LBF_TO_NEWTONS
+
                     d2_ds = run_grp.create_dataset("d2", data=d2)
                     d2_ds.attrs["columns"] = np.array(d2_colnames, dtype='S')
+                    d2_ds.attrs["PSF_to_Pa"] = PSF_TO_PA
+                    d2_ds.attrs["LBF_to_Newtons"] = LBF_TO_NEWTONS
                     run_grp.attrs["description"] = "no description available"
                     run_grp.attrs["weighted_Cz"] = 0.0
                     run_grp.attrs["weighted_Cx"] = 0.0
                     run_grp.attrs["offset_Cz"] = 0.0
                     run_grp.attrs["offset_Cx"] = 0.0
+                    # Store conversion constants at run level too
+                    run_grp.attrs["PSF_to_Pa"] = PSF_TO_PA
+                    run_grp.attrs["LBF_to_Newtons"] = LBF_TO_NEWTONS
                     # Set run_type to the first option from run_plot_config
                     run_grp.attrs["run_type"] = run_type_options[0] if run_type_options else ""
                     # Set map to the first option from wt_maps
@@ -434,23 +628,42 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                     
                     # Create d1_processed dataset with setpoints from the selected map and d1 data
                     if selected_map:
-                        # Create combined data with map setpoints and d1 columns
-                        combined_data, combined_columns = create_d1_processed_data(
-                            selected_map, d1, d1_colnames, d1_structured, d1_structured_cols
-                        )
-                        if combined_data and combined_columns:
-                            # Convert structured data to numpy array
-                            combined_array = np.array(combined_data, dtype='S50')  # S50 for string up to 50 chars
-                            d1_processed_ds = run_grp.create_dataset("d1_processed", data=combined_array)
-                            d1_processed_ds.attrs["description"] = f"Setpoints from map: {selected_map} with d1 data columns"
-                            # Store column names as attributes
-                            d1_processed_ds.attrs["columns"] = np.array(combined_columns, dtype='S50')
+                        # Validate row counts before creation
+                        sp_data_for_count, _sp_cols = load_setpoints_from_map(selected_map)
+                        map_rows = len(sp_data_for_count) if sp_data_for_count else 0
+                        d1_rows = int(d1.shape[0]) if hasattr(d1, 'shape') and len(d1.shape) > 0 else 0
+                        if map_rows > 0 and d1_rows > 0 and map_rows != d1_rows:
+                            message = f"Error: map has {map_rows} rows but d1 has {d1_rows} rows. d1_processed not created."
                         else:
-                            # Create empty dataset if no setpoints found
-                            empty_setpoints = np.array([], dtype='S50').reshape(0, 0)
-                            d1_processed_ds = run_grp.create_dataset("d1_processed", data=empty_setpoints)
-                            d1_processed_ds.attrs["description"] = f"No setpoints found for map: {selected_map}"
-                            d1_processed_ds.attrs["columns"] = np.array([], dtype='S50')
+                            # Create combined data with map setpoints and d1 columns
+                            combined_data, combined_columns = create_d1_processed_data(
+                                selected_map, d1, d1_colnames, d1_structured, d1_structured_cols
+                            )
+                            if combined_data and combined_columns:
+                                # Convert structured data to numpy array
+                                combined_array = np.array(combined_data, dtype='S50')  # S50 for string up to 50 chars
+                                d1_processed_ds = run_grp.create_dataset("d1_processed", data=combined_array)
+                                d1_processed_ds.attrs["description"] = f"Setpoints from map: {selected_map} with d1 data columns"
+                                # Store column names as attributes
+                                d1_processed_ds.attrs["columns"] = np.array(combined_columns, dtype='S50')
+                                # Compute weighted coefficients and store on run
+                                ok, err = compute_weighted_coeffs_from_d1_processed(run_grp)
+                                if not ok:
+                                    message = (message + f"; {err}") if message else err
+                                else:
+                                    try:
+                                        cz_val = float(run_grp.attrs.get("weighted_Cz", 0.0))
+                                        cx_val = float(run_grp.attrs.get("weighted_Cx", 0.0))
+                                        msg2 = f"Computed weighted Cz={cz_val:.4f}, Cx={cx_val:.4f} for run {folder_name}"
+                                        message = (message + "; " + msg2) if message else msg2
+                                    except Exception:
+                                        pass
+                            else:
+                                # Create empty dataset if no setpoints found
+                                empty_setpoints = np.array([], dtype='S50').reshape(0, 0)
+                                d1_processed_ds = run_grp.create_dataset("d1_processed", data=empty_setpoints)
+                                d1_processed_ds.attrs["description"] = f"No setpoints found for map: {selected_map}"
+                                d1_processed_ds.attrs["columns"] = np.array([], dtype='S50')
                     else:
                         # Create empty dataset if no map selected
                         empty_setpoints = np.array([], dtype='S50').reshape(0, 0)
@@ -475,11 +688,26 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                         table_data = []
                         for run in runs:
                             run_attrs = h5f["wt_runs"][run].attrs
+                            print(f"[DEBUG] Run '{run}' attributes: {dict(run_attrs)}")
                             def get_attr(key):
                                 v = run_attrs.get(key, "")
                                 if isinstance(v, bytes):
                                     v = v.decode()
                                 return v
+                            
+                            def get_weighted_attr(key):
+                                v = run_attrs.get(key, 0.0)
+                                if isinstance(v, bytes):
+                                    v = v.decode()
+                                print(f"[DEBUG] get_weighted_attr({key}): raw_value={v}, type={type(v)}")
+                                try:
+                                    val = float(v)
+                                    formatted = f"{val:.6f}"
+                                    print(f"[DEBUG] get_weighted_attr({key}): formatted={formatted}")
+                                    return formatted
+                                except (ValueError, TypeError) as e:
+                                    print(f"[DEBUG] get_weighted_attr({key}): error={e}")
+                                    return "0.000000"
                             rt_value = get_attr("run_type")
                             # Ensure selected value is valid and present in the dropdown options
                             if (not rt_value) or (run_type_options and rt_value not in run_type_options):
@@ -492,8 +720,8 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                             table_data.append({
                                 "run": run,
                                 "description": get_attr("description"),
-                                "weighted_Cz": get_attr("weighted_Cz"),
-                                "weighted_Cx": get_attr("weighted_Cx"),
+                                "weighted_Cz": get_weighted_attr("weighted_Cz"),
+                                "weighted_Cx": get_weighted_attr("weighted_Cx"),
                                 "offset_Cz": get_attr("offset_Cz"),
                                 "offset_Cx": get_attr("offset_Cx"),
                                 "run_type": rt_value,
@@ -581,11 +809,27 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                     table_data = []
                     for run in runs:
                         run_attrs = h5f["wt_runs"][run].attrs
+                        print(f"[DEBUG] Run '{run}' attributes: {dict(run_attrs)}")
                         def get_attr(key):
                             v = run_attrs.get(key, "")
                             if isinstance(v, bytes):
                                 v = v.decode()
                             return v
+                        
+                        def get_weighted_attr(key):
+                            v = run_attrs.get(key, 0.0)
+                            if isinstance(v, bytes):
+                                v = v.decode()
+                            print(f"[DEBUG] get_weighted_attr({key}): raw_value={v}, type={type(v)}")
+                            try:
+                                val = float(v)
+                                formatted = f"{val:.6f}"
+                                print(f"[DEBUG] get_weighted_attr({key}): formatted={formatted}")
+                                return formatted
+                            except (ValueError, TypeError) as e:
+                                print(f"[DEBUG] get_weighted_attr({key}): error={e}")
+                                return "0.000000"
+                        
                         def to_plain_type(val):
                             import numpy as np
                             # Convert numpy types to Python types
@@ -619,8 +863,8 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, table_da
                         table_data.append({
                             "run": to_plain_type(run),
                             "description": to_plain_type(get_attr("description")),
-                            "weighted_Cz": to_plain_type(get_attr("weighted_Cz")),
-                            "weighted_Cx": to_plain_type(get_attr("weighted_Cx")),
+                            "weighted_Cz": get_weighted_attr("weighted_Cz"),
+                            "weighted_Cx": get_weighted_attr("weighted_Cx"),
                             "offset_Cz": to_plain_type(get_attr("offset_Cz")),
                             "offset_Cx": to_plain_type(get_attr("offset_Cx")),
                             "run_type": rt_value,
@@ -738,43 +982,54 @@ def save_table_changes(table_data, homologation):
                     
                     # Update d1_processed dataset if map has changed
                     if new_map != old_map:
-                        # Remove existing d1_processed dataset if it exists
+                        # Always remove existing d1_processed dataset if it exists
                         if "d1_processed" in run_grp:
                             del run_grp["d1_processed"]
-                        
-                        # Create new d1_processed dataset with setpoints from the new map
+
+                        # If a new map is provided, validate and recreate
                         if new_map:
                             # Get d1 data and columns from the existing dataset
                             d1_data = []
                             d1_columns = []
+                            d1_structured = None
+                            d1_structured_cols = []
                             if "d1" in run_grp:
                                 d1_dataset = run_grp["d1"]
                                 d1_data = d1_dataset[:]
                                 if "columns" in d1_dataset.attrs:
-                                    d1_columns = [col.decode() if isinstance(col, bytes) else col 
-                                                for col in d1_dataset.attrs["columns"]]
-                            
+                                    d1_columns = [col.decode() if isinstance(col, bytes) else col for col in d1_dataset.attrs["columns"]]
+                                # Attempt to load structured d1 via file path if possible is not trivial here; use raw arrays
+
+                            # Validate row counts between selected map and d1
+                            sp_data_for_count, _sp_cols = load_setpoints_from_map(new_map)
+                            map_rows = len(sp_data_for_count) if sp_data_for_count else 0
+                            d1_rows = int(d1_data.shape[0]) if hasattr(d1_data, 'shape') and len(d1_data.shape) > 0 else (len(d1_data) if isinstance(d1_data, (list, np.ndarray)) else 0)
+                            if map_rows > 0 and d1_rows > 0 and map_rows != d1_rows:
+                                return f"Error: map has {map_rows} rows but d1 has {d1_rows} rows. d1_processed not created"
+
                             # Create combined data with map setpoints and d1 columns
-                            combined_data, combined_columns = create_d1_processed_data(new_map, d1_data, d1_columns)
+                            combined_data, combined_columns = create_d1_processed_data(new_map, d1_data, d1_columns, d1_structured, d1_structured_cols)
                             if combined_data and combined_columns:
-                                # Convert structured data to numpy array
                                 combined_array = np.array(combined_data, dtype='S50')
                                 d1_processed_ds = run_grp.create_dataset("d1_processed", data=combined_array)
                                 d1_processed_ds.attrs["description"] = f"Setpoints from map: {new_map} with d1 data columns"
-                                # Store column names as attributes
                                 d1_processed_ds.attrs["columns"] = np.array(combined_columns, dtype='S50')
+                                ok, err = compute_weighted_coeffs_from_d1_processed(run_grp)
+                                if not ok:
+                                    return err
+                                else:
+                                    try:
+                                        cz_val = float(run_grp.attrs.get("weighted_Cz", 0.0))
+                                        cx_val = float(run_grp.attrs.get("weighted_Cx", 0.0))
+                                        return f"Computed weighted Cz={cz_val:.4f}, Cx={cx_val:.4f} for run {run_name if 'run_name' in locals() else ''}"
+                                    except Exception:
+                                        return "Computed weighted coefficients"
                             else:
-                                # Create empty dataset if no setpoints found
-                                empty_setpoints = np.array([], dtype='S50').reshape(0, 0)
-                                d1_processed_ds = run_grp.create_dataset("d1_processed", data=empty_setpoints)
-                                d1_processed_ds.attrs["description"] = f"No setpoints found for map: {new_map}"
-                                d1_processed_ds.attrs["columns"] = np.array([], dtype='S50')
+                                # If there is no setpoint data, do not recreate
+                                return f"Error: No setpoints found for map: {new_map}. d1_processed not created"
                         else:
-                            # Create empty dataset if no map selected
-                            empty_setpoints = np.array([], dtype='S50').reshape(0, 0)
-                            d1_processed_ds = run_grp.create_dataset("d1_processed", data=empty_setpoints)
-                            d1_processed_ds.attrs["description"] = "No map selected"
-                            d1_processed_ds.attrs["columns"] = np.array([], dtype='S50')
+                            # No map selected; do not recreate
+                            return "No map selected; d1_processed not created"
         
         return "Changes saved successfully"
     except Exception as e:
