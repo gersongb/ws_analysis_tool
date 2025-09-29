@@ -116,6 +116,7 @@ layout = dbc.Container([
                                 {"name": "Offset Cz", "id": "offset_Cz", "editable": True},
                                 {"name": "Offset Cx", "id": "offset_Cx", "editable": True},
                                 {"name": "Run Type", "id": "run_type", "editable": True, "presentation": "dropdown"},
+                                {"name": "Map", "id": "map", "editable": True, "presentation": "dropdown"},
                                 {"name": "", "id": "delete", "presentation": "markdown", "editable": False},
                             ],
                             data=[],
@@ -131,12 +132,13 @@ layout = dbc.Container([
                             },
                             style_cell_conditional=[
                                 {"if": {"column_id": "run"}, "width": "120px"},
-                                {"if": {"column_id": "description"}, "width": "35%", "maxWidth": "380px"},
+                                {"if": {"column_id": "description"}, "width": "30%", "maxWidth": "320px"},
                                 {"if": {"column_id": "weighted_Cz"}, "width": "90px", "textAlign": "center"},
                                 {"if": {"column_id": "weighted_Cx"}, "width": "90px", "textAlign": "center"},
                                 {"if": {"column_id": "offset_Cz"}, "width": "90px", "textAlign": "center"},
                                 {"if": {"column_id": "offset_Cx"}, "width": "90px", "textAlign": "center"},
                                 {"if": {"column_id": "run_type"}, "width": "160px"},
+                                {"if": {"column_id": "map"}, "width": "160px"},
                                 {"if": {"column_id": "delete"}, "width": "36px", "minWidth": "36px", "maxWidth": "36px", "textAlign": "center", "padding": "0", "overflow": "hidden"}
                             ],
                             css=[

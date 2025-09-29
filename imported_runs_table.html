@@ -1,0 +1,64 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Imported Runs</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { text-align: center; }
+        table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f5f5f5; font-weight: bold; text-align: center; }
+        .numeric { text-align: center; }
+        #copyBtn { position: fixed; top: 10px; right: 10px; padding: 8px 16px; 
+                   background: #007bff; color: white; border: none; border-radius: 4px; 
+                   cursor: pointer; font-size: 14px; }
+        #copyBtn:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+    <button id="copyBtn" onclick="copyTableToClipboard()">Copy to Clipboard</button>
+    <h1>Imported Runs</h1>
+    <table id="dataTable">
+        <thead>
+            <tr>
+                <th>Run</th><th>Description</th><th>Weighted Cz</th><th>Weighted Cx</th><th>Offset Cz</th><th>Offset Cx</th><th>Run Type</th>
+            </tr>
+        </thead>
+        <tbody>
+<tr><td class="">Run00005</td><td class="">rr</td><td class="numeric">0</td><td class="numeric">0</td><td class="numeric">0.053</td><td class="numeric">0</td><td class="">homologation</td></tr><tr><td class="">Run00012</td><td class="">no description available</td><td class="numeric">0</td><td class="numeric">0</td><td class="numeric">0</td><td class="numeric">0</td><td class="">testing_short</td></tr>
+        </tbody>
+    </table>
+    <script>
+        function copyTableToClipboard() {
+            const table = document.getElementById('dataTable');
+            const rows = table.querySelectorAll('tr');
+            let text = '';
+            
+            rows.forEach(row => {
+                const cells = row.querySelectorAll('th, td');
+                const rowData = Array.from(cells).map(cell => cell.textContent);
+                text += rowData.join('\t') + '\n';
+            });
+            
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(() => {
+                    const btn = document.getElementById('copyBtn');
+                    const originalText = btn.textContent;
+                    btn.textContent = 'Copied!';
+                    btn.style.background = '#28a745';
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.style.background = '#007bff';
+                    }, 2000);
+                }).catch(err => {
+                    alert('Failed to copy to clipboard: ' + err);
+                });
+            } else {
+                alert('Clipboard API not supported in this browser');
+            }
+        }
+    </script>
+</body>
+</html>

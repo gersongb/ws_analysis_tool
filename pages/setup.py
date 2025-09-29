@@ -11,6 +11,7 @@ if not os.path.exists(HOMOLOGATIONS_DIR):
     os.makedirs(HOMOLOGATIONS_DIR)
 
 MANUFACTURERS_FILE = os.path.join(os.path.dirname(__file__), "..", "config", "manufacturers.json")
+MAPS_FILE = os.path.join(os.path.dirname(__file__), "..", "config", "maps.json")
 
 # Ensure manufacturers file exists
 if not os.path.exists(MANUFACTURERS_FILE):
@@ -199,6 +200,24 @@ def unified_homologation_callback(
                 os.makedirs(config_dst_dir, exist_ok=True)
                 for fname in ["wt.json", "brake_blanking.json", "run_plot_config.json"]:
                     shutil.copy2(os.path.join(config_src_dir, fname), os.path.join(config_dst_dir, fname))
+                # Generate one JSON file per map into wt_maps, derived from config/maps.json
+                try:
+                    if os.path.exists(MAPS_FILE):
+                        with open(MAPS_FILE, "r") as mf:
+                            maps_payload = json.load(mf)
+                        # Write each top-level map into its own JSON file
+                        for map_name, map_content in maps_payload.items():
+                            out_path = os.path.join(wt_maps_path, f"{map_name}.json")
+                            with open(out_path, "w") as out_f:
+                                json.dump(map_content, out_f, indent=2)
+                    else:
+                        # If maps.json is missing, create an empty placeholder to avoid breaking downstream flows
+                        placeholder_path = os.path.join(wt_maps_path, "README.txt")
+                        with open(placeholder_path, "w") as pf:
+                            pf.write("No maps.json found at creation time. Place per-map JSON files here.")
+                except Exception as map_e:
+                    # Non-fatal: proceed with homologation creation but report in feedback
+                    create_msg = f"Created homologation '{session_name}', but failed to create wt_maps files: {map_e}"
                 h5_path = os.path.join(data_path, f"{session_name}.h5")
                 data = {
                     "manufacturer": manufacturer,
@@ -225,7 +244,9 @@ def unified_homologation_callback(
                     create_homologation_hdf5(h5_path, data)
                 except Exception as e:
                     create_msg = f"Homologation JSON saved, but failed to create HDF5: {e}"
-                create_msg = f"Created homologation '{session_name}'"
+                # Only set a success message if not already set by a maps/HDF5 warning above
+                if not create_msg:
+                    create_msg = f"Created homologation '{session_name}'"
                 dropdown_options = get_homologation_options()
             except Exception as e:
                 create_msg = f"Failed to save homologation: {e}"
