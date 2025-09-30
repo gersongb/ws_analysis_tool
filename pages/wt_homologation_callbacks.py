@@ -142,8 +142,12 @@ def compute_weighted_coeffs_from_d1_processed(run_grp):
         
         # Final weighted values are normalized by the sum of weights
         weighted_cz = float(clw_sum / wcz_sum) if (wcz_sum != 0.0 and not np.isnan(wcz_sum)) else 0.0
-        weighted_cx_base = float(cdw_sum / wcx_sum) if (wcx_sum != 0.0 and not np.isnan(wcx_sum)) else 0.0
+        weighted_cx_base = float(cdw_sum / 100.0)  # Normalize by 100 instead of wcx_sum
         weighted_cx = weighted_cx_base + 0.2 * min_cd  # Add 20% of minimum CD to final weighted_Cx
+        
+        # Round to 3 decimal places (4th decimal will be zero)
+        weighted_cz = round(weighted_cz, 3)
+        weighted_cx = round(weighted_cx, 3)
 
         run_grp.attrs["weighted_Cz"] = weighted_cz
         run_grp.attrs["weighted_Cx"] = weighted_cx
@@ -717,8 +721,9 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                     d2_ds.attrs["PSF_to_Pa"] = PSF_TO_PA
                     d2_ds.attrs["LBF_to_Newtons"] = LBF_TO_NEWTONS
                     run_grp.attrs["description"] = "no description available"
-                    run_grp.attrs["weighted_Cz"] = 0.0
-                    run_grp.attrs["weighted_Cx"] = 0.0
+                    # Don't initialize weighted values to 0.0 - they will be computed from d1_processed
+                    # run_grp.attrs["weighted_Cz"] = 0.0
+                    # run_grp.attrs["weighted_Cx"] = 0.0
                     run_grp.attrs["offset_Cz"] = 0.0
                     run_grp.attrs["offset_Cx"] = 0.0
                     # Store conversion constants at run level too
@@ -810,12 +815,12 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                                 print(f"[DEBUG] get_weighted_attr({key}): raw_value={v}, type={type(v)}")
                                 try:
                                     val = float(v)
-                                    formatted = f"{val:.6f}"
+                                    formatted = f"{val:.4f}"  # Changed to 4 decimal places
                                     print(f"[DEBUG] get_weighted_attr({key}): formatted={formatted}")
                                     return formatted
                                 except (ValueError, TypeError) as e:
                                     print(f"[DEBUG] get_weighted_attr({key}): error={e}")
-                                    return "0.000000"
+                                    return "0.0000"  # Changed to 4 decimal places
                             rt_value = get_attr("run_type")
                             # Ensure selected value is valid and present in the dropdown options
                             if (not rt_value) or (run_type_options and rt_value not in run_type_options):
@@ -931,12 +936,12 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                             print(f"[DEBUG] get_weighted_attr({key}): raw_value={v}, type={type(v)}")
                             try:
                                 val = float(v)
-                                formatted = f"{val:.6f}"
+                                formatted = f"{val:.4f}"  # Changed to 4 decimal places
                                 print(f"[DEBUG] get_weighted_attr({key}): formatted={formatted}")
                                 return formatted
                             except (ValueError, TypeError) as e:
                                 print(f"[DEBUG] get_weighted_attr({key}): error={e}")
-                                return "0.000000"
+                                return "0.0000"  # Changed to 4 decimal places
                         
                         def to_plain_type(val):
                             import numpy as np
@@ -1086,8 +1091,6 @@ def save_table_changes(table_data, homologation):
                     if isinstance(old_map, bytes):
                         old_map = old_map.decode()
                     
-                    run_grp.attrs["map"] = new_map
-                    
                     # Update d1_processed dataset if map has changed
                     if new_map != old_map:
                         # Always remove existing d1_processed dataset if it exists
@@ -1113,7 +1116,16 @@ def save_table_changes(table_data, homologation):
                             map_rows = len(sp_data_for_count) if sp_data_for_count else 0
                             d1_rows = int(d1_data.shape[0]) if hasattr(d1_data, 'shape') and len(d1_data.shape) > 0 else (len(d1_data) if isinstance(d1_data, (list, np.ndarray)) else 0)
                             if map_rows > 0 and d1_rows > 0 and map_rows != d1_rows:
-                                return f"Error: map has {map_rows} rows but d1 has {d1_rows} rows. d1_processed not created"
+                                # Restore d1_processed with old map before returning error
+                                if old_map:
+                                    combined_data, combined_columns = create_d1_processed_data(old_map, d1_data, d1_columns, d1_structured, d1_structured_cols)
+                                    if combined_data and combined_columns:
+                                        combined_array = np.array(combined_data, dtype='S50')
+                                        d1_processed_ds = run_grp.create_dataset("d1_processed", data=combined_array)
+                                        d1_processed_ds.attrs["description"] = f"Setpoints from map: {old_map} with d1 data columns"
+                                        d1_processed_ds.attrs["columns"] = np.array(combined_columns, dtype='S50')
+                                        compute_weighted_coeffs_from_d1_processed(run_grp)
+                                return f"Error: map has {map_rows} rows but d1 has {d1_rows} rows. Map remains: {old_map}"
 
                             # Create combined data with map setpoints and d1 columns
                             combined_data, combined_columns = create_d1_processed_data(new_map, d1_data, d1_columns, d1_structured, d1_structured_cols)
@@ -1126,6 +1138,8 @@ def save_table_changes(table_data, homologation):
                                 if not ok:
                                     return min_cd_msg
                                 else:
+                                    # Only update map attribute after successful creation
+                                    run_grp.attrs["map"] = new_map
                                     try:
                                         cz_val = float(run_grp.attrs.get("weighted_Cz", 0.0))
                                         cx_val = float(run_grp.attrs.get("weighted_Cx", 0.0))
@@ -1138,9 +1152,10 @@ def save_table_changes(table_data, homologation):
                                         return "Computed weighted coefficients"
                             else:
                                 # If there is no setpoint data, do not recreate
-                                return f"Error: No setpoints found for map: {new_map}. d1_processed not created"
+                                return f"Error: No setpoints found for map: {new_map}. Map remains: {old_map}"
                         else:
-                            # No map selected; do not recreate
+                            # No map selected; clear map and do not recreate
+                            run_grp.attrs["map"] = new_map
                             return "No map selected; d1_processed not created"
         
         return "Changes saved successfully"

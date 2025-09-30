@@ -23,5 +23,10 @@
     "colour": "green",
     "continuous_line": false,
     "blanking_window": false
+  },
+  "ignore": {
+    "colour": null,
+    "continuous_line": false,
+    "blanking_window": false
   }
 }
