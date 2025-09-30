@@ -24,10 +24,15 @@ def compute_weighted_coeffs_from_d1_processed(run_grp):
     Given:
     - drag_tare = D value at setpoint == 'ZeroD1'
     - lift_tare = L value at setpoint == 'ZeroL'
-    - CLW = (L - lift_tare) * LBF_TO_NEWTONS * w_cz / (DYNPR * PSF_TO_PA)
-      weighted_Cz = sum(CLW)
-    - CDW = (D - drag_tare) * LBF_TO_NEWTONS * w_cx / (DYNPR * PSF_TO_PA)
-      weighted_Cx = sum(CDW)
+    - CL = (L - lift_tare) * LBF_TO_NEWTONS / (DYNPR * PSF_TO_PA)
+    - CLW = CL * w_cz (only for valid measurements)
+      weighted_Cz = sum(CLW) / sum(ALL w_cz from map)
+    - CD = (D - drag_tare) * LBF_TO_NEWTONS / (DYNPR * PSF_TO_PA)
+    - min_CD = minimum CD from rows with valid (non-NaN) w_cx
+    - CDW = CD * w_cx (only for valid measurements)
+      weighted_Cx = sum(CDW) / sum(ALL w_cx from map) + 0.2 * min_CD
+    
+    Note: Weight sums include ALL valid weights from the map, not just those with valid measurements.
     """
     try:
         if "d1_processed" not in run_grp:
@@ -73,7 +78,35 @@ def compute_weighted_coeffs_from_d1_processed(run_grp):
                 drag_tare = to_float(data[r, D_idx])
             if str(sp_val) == 'ZeroL':
                 lift_tare = to_float(data[r, L_idx])
-        # Compute CLW and CDW, accumulate sums and sum of weights
+        # First pass: find minimum CD from rows with valid w_cx
+        min_cd = float('inf')
+        min_cd_setpoint = "Unknown"
+        valid_cd_values = []
+        for r in range(data.shape[0]):
+            D = to_float(data[r, D_idx]) if D_idx != -1 else float('nan')
+            dynpr = to_float(data[r, DYNPR_idx])
+            wcx = to_float(data[r, wcx_idx]) if wcx_idx != -1 else float('nan')
+            
+            if not (np.isnan(D) or np.isnan(drag_tare) or np.isnan(dynpr) or np.isnan(wcx) or dynpr == 0):
+                cd = (D - drag_tare) * LBF_TO_NEWTONS / (dynpr * PSF_TO_PA)
+                if not np.isnan(cd):
+                    valid_cd_values.append(cd)
+                    if cd < min_cd:
+                        min_cd = cd
+                        # Get setpoint name for this row
+                        sp_val = data[r, sp_idx]
+                        if isinstance(sp_val, (bytes, bytearray)):
+                            sp_val = sp_val.decode()
+                        min_cd_setpoint = str(sp_val)
+        
+        # Handle case where no valid CD values found
+        if min_cd == float('inf'):
+            min_cd = 0.0
+            min_cd_setpoint = "None"
+        
+        print(f"[WT] Minimum CD found (from rows with valid w_cx): {min_cd:.6f} at setpoint '{min_cd_setpoint}'")
+        
+        # Second pass: compute CL, CD, CLW and CDW, accumulate sums and sum of weights
         clw_sum = 0.0
         cdw_sum = 0.0
         wcz_sum = 0.0
@@ -84,31 +117,47 @@ def compute_weighted_coeffs_from_d1_processed(run_grp):
             dynpr = to_float(data[r, DYNPR_idx])
             wcz = to_float(data[r, wcz_idx])
             wcx = to_float(data[r, wcx_idx]) if wcx_idx != -1 else float('nan')
-            if np.isnan(L) or np.isnan(lift_tare) or np.isnan(dynpr) or np.isnan(wcz) or dynpr == 0:
-                continue
-            clw = (L - lift_tare) * LBF_TO_NEWTONS * wcz / (dynpr * PSF_TO_PA)
-            if not np.isnan(clw):
-                clw_sum += clw
-                if not np.isnan(wcz):
-                    wcz_sum += wcz
-            # CDW part requires D, drag_tare and w_cx
-            if not np.isnan(D) and not np.isnan(drag_tare) and not np.isnan(wcx) and dynpr != 0:
-                cdw = (D - drag_tare) * LBF_TO_NEWTONS * wcx / (dynpr * PSF_TO_PA)
-                if not np.isnan(cdw):
+            
+            # Accumulate weight sums for ALL valid weights (not just when measurements are valid)
+            if not np.isnan(wcz):
+                wcz_sum += wcz
+            if not np.isnan(wcx):
+                wcx_sum += wcx
+            
+            # Calculate CL (Coefficient of Lift) first
+            if not (np.isnan(L) or np.isnan(lift_tare) or np.isnan(dynpr) or dynpr == 0):
+                cl = (L - lift_tare) * LBF_TO_NEWTONS / (dynpr * PSF_TO_PA)
+                if not np.isnan(cl) and not np.isnan(wcz):
+                    clw = cl * wcz  # CLW = CL * w_cz
+                    clw_sum += clw
+            
+            # Calculate CD (Coefficient of Drag) first
+            if not (np.isnan(D) or np.isnan(drag_tare) or np.isnan(dynpr) or dynpr == 0):
+                cd = (D - drag_tare) * LBF_TO_NEWTONS / (dynpr * PSF_TO_PA)
+                if not np.isnan(cd) and not np.isnan(wcx):
+                    cdw = cd * wcx  # CDW = CD * w_cx (back to original formula)
                     cdw_sum += cdw
-                    wcx_sum += wcx
+        # Debug: print intermediate sums
+        print(f"[WT DEBUG] clw_sum={clw_sum:.6f}, wcz_sum={wcz_sum:.6f}, cdw_sum={cdw_sum:.6f}, wcx_sum={wcx_sum:.6f}")
+        
         # Final weighted values are normalized by the sum of weights
-        weighted_cz = float(clw_sum / wcz_sum) if wcz_sum not in (0.0, float('nan')) else 0.0
-        weighted_cx = float(cdw_sum / wcx_sum) if wcx_sum not in (0.0, float('nan')) else 0.0
+        weighted_cz = float(clw_sum / wcz_sum) if (wcz_sum != 0.0 and not np.isnan(wcz_sum)) else 0.0
+        weighted_cx_base = float(cdw_sum / wcx_sum) if (wcx_sum != 0.0 and not np.isnan(wcx_sum)) else 0.0
+        weighted_cx = weighted_cx_base + 0.2 * min_cd  # Add 20% of minimum CD to final weighted_Cx
 
         run_grp.attrs["weighted_Cz"] = weighted_cz
         run_grp.attrs["weighted_Cx"] = weighted_cx
+        run_grp.attrs["min_CD"] = min_cd
+        run_grp.attrs["min_CD_setpoint"] = min_cd_setpoint
         try:
             run_name = run_grp.name.split('/')[-1]
         except Exception:
             run_name = str(run_grp)
-        print(f"[WT] Run '{run_name}': weighted_Cz={weighted_cz:.6f}, weighted_Cx={weighted_cx:.6f}")
-        return True, ""
+        print(f"[WT] Run '{run_name}': weighted_Cz={weighted_cz:.6f}, weighted_Cx_base={weighted_cx_base:.6f}, min_CD_offset={0.2 * min_cd:.6f}, weighted_Cx={weighted_cx:.6f}")
+        
+        # Return success message with minimum CD info
+        success_msg = f"Minimum CD: {min_cd:.6f} at ride height '{min_cd_setpoint}'"
+        return True, success_msg
     except Exception as e:
         return False, f"Error computing weighted coeffs: {e}"
 
@@ -196,8 +245,8 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
         # Define the d1 columns we want to append
         d1_columns_to_append = ["D", "L", "LF", "LR", "DYNPR", "Tunnel_Air_Temp", "Relative_Humidity"]
         
-        # Add calculated columns for CLW and CDW
-        calculated_columns = ["CLW", "CDW"]
+        # Add calculated columns for CL, CD, CLW and CDW
+        calculated_columns = ["CL", "CD", "CLW", "CDW"]
         
         # Debug: Print column information
         print(f"Available d1 columns: {d1_columns}")
@@ -293,6 +342,49 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
                     if str(sp_name) == 'ZeroL' and 'L' in d1_column_indices and i < len(d1_data):
                         lift_tare = to_float(d1_data[i][d1_column_indices['L']])
 
+        # Find minimum CD from rows with valid w_cx for CDW calculation
+        min_cd = float('inf')
+        for i, setpoint_row in enumerate(setpoints_data):
+            try:
+                # Get D, DYNPR, and w_cx values for this setpoint
+                D = 0.0
+                dynpr = 0.0
+                wcx = 0.0
+                
+                # Get setpoint name
+                sp_name = None
+                sp_col_idx = _find_col_index('setpoint', map_columns)
+                if sp_col_idx != -1:
+                    sp_name = setpoint_row[sp_col_idx]
+                
+                # Extract D and DYNPR values
+                if sp_name is not None and sp_name in per_setpoint_values:
+                    D = per_setpoint_values[sp_name].get('D', 0.0)
+                    dynpr = per_setpoint_values[sp_name].get('DYNPR', 0.0)
+                elif 'D' in d1_column_indices and 'DYNPR' in d1_column_indices and i < len(d1_data):
+                    row_index = min(i, len(d1_data) - 1)
+                    D = to_float(d1_data[row_index][d1_column_indices['D']])
+                    dynpr = to_float(d1_data[row_index][d1_column_indices['DYNPR']])
+                
+                # Extract w_cx from map setpoint
+                wcx_idx = _find_col_index('w_cx', map_columns)
+                if wcx_idx != -1:
+                    wcx = to_float(setpoint_row[wcx_idx])
+                
+                # Calculate CD if all values are valid
+                if not (np.isnan(D) or np.isnan(drag_tare) or np.isnan(dynpr) or np.isnan(wcx) or dynpr == 0):
+                    cd = (D - drag_tare) * LBF_TO_NEWTONS / (dynpr * PSF_TO_PA)
+                    if not np.isnan(cd):
+                        min_cd = min(min_cd, cd)
+            except Exception:
+                continue
+        
+        # Handle case where no valid CD values found
+        if min_cd == float('inf'):
+            min_cd = 0.0
+        
+        print(f"[WT] Minimum CD found for d1_processed (from rows with valid w_cx): {min_cd:.6f}")
+
         for i, setpoint_row in enumerate(setpoints_data):
             combined_row = setpoint_row.copy()
 
@@ -317,7 +409,9 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
                         used = True
                 combined_row.append(val_str)
 
-            # Calculate CLW and CDW for this row
+            # Calculate CL, CD, CLW and CDW for this row
+            cl_val = ""
+            cd_val = ""
             clw_val = ""
             cdw_val = ""
             
@@ -348,21 +442,31 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
                 if wcx_idx != -1:
                     wcx = to_float(setpoint_row[wcx_idx])
                 
-                # Calculate CLW and CDW
-                if not np.isnan(L) and not np.isnan(lift_tare) and not np.isnan(dynpr) and not np.isnan(wcz) and dynpr != 0:
-                    clw = (L - lift_tare) * LBF_TO_NEWTONS * wcz / (dynpr * PSF_TO_PA)
-                    if not np.isnan(clw):
-                        clw_val = f"{clw:.6f}"
+                # Calculate CL, CD, CLW and CDW using intermediate steps
+                # Calculate CL (Coefficient of Lift) first
+                if not np.isnan(L) and not np.isnan(lift_tare) and not np.isnan(dynpr) and dynpr != 0:
+                    cl = (L - lift_tare) * LBF_TO_NEWTONS / (dynpr * PSF_TO_PA)
+                    if not np.isnan(cl):
+                        cl_val = f"{cl:.6f}"
+                        if not np.isnan(wcz):
+                            clw = cl * wcz  # CLW = CL * w_cz
+                            clw_val = f"{clw:.6f}"
                 
-                if not np.isnan(D) and not np.isnan(drag_tare) and not np.isnan(dynpr) and not np.isnan(wcx) and dynpr != 0:
-                    cdw = (D - drag_tare) * LBF_TO_NEWTONS * wcx / (dynpr * PSF_TO_PA)
-                    if not np.isnan(cdw):
-                        cdw_val = f"{cdw:.6f}"
+                # Calculate CD (Coefficient of Drag) first
+                if not np.isnan(D) and not np.isnan(drag_tare) and not np.isnan(dynpr) and dynpr != 0:
+                    cd = (D - drag_tare) * LBF_TO_NEWTONS / (dynpr * PSF_TO_PA)
+                    if not np.isnan(cd):
+                        cd_val = f"{cd:.6f}"
+                        if not np.isnan(wcx):
+                            cdw = cd * wcx  # CDW = CD * w_cx (back to original formula)
+                            cdw_val = f"{cdw:.6f}"
                         
             except Exception as e:
-                print(f"Error calculating CLW/CDW for row {i}: {e}")
+                print(f"Error calculating CL/CD/CLW/CDW for row {i}: {e}")
             
-            # Append calculated values
+            # Append calculated values in order: CL, CD, CLW, CDW
+            combined_row.append(cl_val)
+            combined_row.append(cd_val)
             combined_row.append(clw_val)
             combined_row.append(cdw_val)
 
@@ -647,14 +751,18 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                                 # Store column names as attributes
                                 d1_processed_ds.attrs["columns"] = np.array(combined_columns, dtype='S50')
                                 # Compute weighted coefficients and store on run
-                                ok, err = compute_weighted_coeffs_from_d1_processed(run_grp)
+                                ok, min_cd_msg = compute_weighted_coeffs_from_d1_processed(run_grp)
                                 if not ok:
-                                    message = (message + f"; {err}") if message else err
+                                    message = (message + f"; {min_cd_msg}") if message else min_cd_msg
                                 else:
                                     try:
                                         cz_val = float(run_grp.attrs.get("weighted_Cz", 0.0))
                                         cx_val = float(run_grp.attrs.get("weighted_Cx", 0.0))
-                                        msg2 = f"Computed weighted Cz={cz_val:.4f}, Cx={cx_val:.4f} for run {folder_name}"
+                                        min_cd_val = float(run_grp.attrs.get("min_CD", 0.0))
+                                        min_cd_sp = run_grp.attrs.get("min_CD_setpoint", "Unknown")
+                                        if isinstance(min_cd_sp, bytes):
+                                            min_cd_sp = min_cd_sp.decode()
+                                        msg2 = f"Computed weighted Cz={cz_val:.4f}, Cx={cx_val:.4f} for run {folder_name}. {min_cd_msg}"
                                         message = (message + "; " + msg2) if message else msg2
                                     except Exception:
                                         pass
@@ -1014,14 +1122,18 @@ def save_table_changes(table_data, homologation):
                                 d1_processed_ds = run_grp.create_dataset("d1_processed", data=combined_array)
                                 d1_processed_ds.attrs["description"] = f"Setpoints from map: {new_map} with d1 data columns"
                                 d1_processed_ds.attrs["columns"] = np.array(combined_columns, dtype='S50')
-                                ok, err = compute_weighted_coeffs_from_d1_processed(run_grp)
+                                ok, min_cd_msg = compute_weighted_coeffs_from_d1_processed(run_grp)
                                 if not ok:
-                                    return err
+                                    return min_cd_msg
                                 else:
                                     try:
                                         cz_val = float(run_grp.attrs.get("weighted_Cz", 0.0))
                                         cx_val = float(run_grp.attrs.get("weighted_Cx", 0.0))
-                                        return f"Computed weighted Cz={cz_val:.4f}, Cx={cx_val:.4f} for run {run_name if 'run_name' in locals() else ''}"
+                                        min_cd_val = float(run_grp.attrs.get("min_CD", 0.0))
+                                        min_cd_sp = run_grp.attrs.get("min_CD_setpoint", "Unknown")
+                                        if isinstance(min_cd_sp, bytes):
+                                            min_cd_sp = min_cd_sp.decode()
+                                        return f"Computed weighted Cz={cz_val:.4f}, Cx={cx_val:.4f} for run {run_name if 'run_name' in locals() else ''}. {min_cd_msg}"
                                     except Exception:
                                         return "Computed weighted coefficients"
                             else:
