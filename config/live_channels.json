@@ -1,0 +1,48 @@
+{
+  "Model": [
+    "LF Laser",
+    "RF Laser",
+    "Rear Laser",
+    "YAW"
+  ],
+  "Lift/Drag Forces": [
+    "LF",
+    "LR",
+    "L",
+    "D"
+  ],
+  "Side Forces": [
+    "S",
+    "SF",
+    "SR"
+  ],
+  "Moments": [
+    "PM",
+    "YM",
+    "RM"
+  ],
+  "WT 1": [
+    "DYNPR",
+    "RRS Speed Feedback",
+    "Tunnel_Air_Temp",
+    "Relative_Humidity"
+  ],
+  "WT 2": [
+    "RRS LF Roller Bearing Temp",
+    "RRS LR Roller Bearing Temp",
+    "RRS RF Roller Bearing Temp",
+    "RRS RR Roller Bearing Temp"
+  ],
+  "Tyre Pressure": [
+    "CAN_37_pTireFL",
+    "CAN_37_pTireFR",
+    "CAN_37_pTireRL",
+    "CAN_37_pTireRR"
+  ],
+  "Upright Temperature": [
+    "CAN_37_TUprightFL",
+    "CAN_37_TUprightFR",
+    "CAN_37_TUprightRL",
+    "CAN_37_TUprightRR"
+  ]
+}

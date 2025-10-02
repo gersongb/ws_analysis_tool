@@ -137,8 +137,6 @@ def compute_weighted_coeffs_from_d1_processed(run_grp):
                 if not np.isnan(cd) and not np.isnan(wcx):
                     cdw = cd * wcx  # CDW = CD * w_cx (back to original formula)
                     cdw_sum += cdw
-        # Debug: print intermediate sums
-        print(f"[WT DEBUG] clw_sum={clw_sum:.6f}, wcz_sum={wcz_sum:.6f}, cdw_sum={cdw_sum:.6f}, wcx_sum={wcx_sum:.6f}")
         
         # Final weighted values are normalized by the sum of weights
         weighted_cz = float(clw_sum / wcz_sum) if (wcz_sum != 0.0 and not np.isnan(wcz_sum)) else 0.0
@@ -496,7 +494,7 @@ def update_run_folder_list(homologation, n_intervals):
     if not os.path.isdir(folder):
         return html.Div(f"Folder not found: {folder}", style={"color": "#c00"})
     try:
-        subfolders = [f for f in os.listdir(folder) if os.path.isdir(os.path.join(folder, f))]
+        subfolders = [f for f in os.listdir(folder) if os.path.isdir(os.path.join(folder, f)) and "Run0" in f]
         subfolders = sorted(
             subfolders,
             key=lambda f: os.path.getmtime(os.path.join(folder, f)),
@@ -801,7 +799,6 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                         table_data = []
                         for run in runs:
                             run_attrs = h5f["wt_runs"][run].attrs
-                            print(f"[DEBUG] Run '{run}' attributes: {dict(run_attrs)}")
                             def get_attr(key):
                                 v = run_attrs.get(key, "")
                                 if isinstance(v, bytes):
@@ -812,14 +809,11 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                                 v = run_attrs.get(key, 0.0)
                                 if isinstance(v, bytes):
                                     v = v.decode()
-                                print(f"[DEBUG] get_weighted_attr({key}): raw_value={v}, type={type(v)}")
                                 try:
                                     val = float(v)
                                     formatted = f"{val:.4f}"  # Changed to 4 decimal places
-                                    print(f"[DEBUG] get_weighted_attr({key}): formatted={formatted}")
                                     return formatted
-                                except (ValueError, TypeError) as e:
-                                    print(f"[DEBUG] get_weighted_attr({key}): error={e}")
+                                except (ValueError, TypeError):
                                     return "0.0000"  # Changed to 4 decimal places
                             rt_value = get_attr("run_type")
                             # Ensure selected value is valid and present in the dropdown options
@@ -922,7 +916,6 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                     table_data = []
                     for run in runs:
                         run_attrs = h5f["wt_runs"][run].attrs
-                        print(f"[DEBUG] Run '{run}' attributes: {dict(run_attrs)}")
                         def get_attr(key):
                             v = run_attrs.get(key, "")
                             if isinstance(v, bytes):
@@ -933,14 +926,11 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                             v = run_attrs.get(key, 0.0)
                             if isinstance(v, bytes):
                                 v = v.decode()
-                            print(f"[DEBUG] get_weighted_attr({key}): raw_value={v}, type={type(v)}")
                             try:
                                 val = float(v)
                                 formatted = f"{val:.4f}"  # Changed to 4 decimal places
-                                print(f"[DEBUG] get_weighted_attr({key}): formatted={formatted}")
                                 return formatted
-                            except (ValueError, TypeError) as e:
-                                print(f"[DEBUG] get_weighted_attr({key}): error={e}")
+                            except (ValueError, TypeError):
                                 return "0.0000"  # Changed to 4 decimal places
                         
                         def to_plain_type(val):
