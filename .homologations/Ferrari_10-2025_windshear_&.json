@@ -1,0 +1,14 @@
+{
+  "manufacturer": "Ferrari",
+  "homologation_date": "2025-10-01",
+  "session_name": "Ferrari_10-2025_windshear_&",
+  "name_identifier": "&",
+  "base_folder": "C:\\Users\\g.garsed\\Documents\\homologations",
+  "reference_folder": "C:\\Users\\g.garsed\\Documents\\homologations\\Ferrari_10-2025_windshear_&",
+  "wt_maps": "C:\\Users\\g.garsed\\Documents\\homologations\\Ferrari_10-2025_windshear_&\\wt_maps",
+  "data": "C:\\Users\\g.garsed\\Documents\\homologations\\Ferrari_10-2025_windshear_&\\data",
+  "raw": "C:\\Users\\g.garsed\\Documents\\homologations\\Ferrari_10-2025_windshear_&\\data\\raw",
+  "data_source_folder": "C:\\Users\\g.garsed\\Documents\\wt_homologation",
+  "wind_tunnel": "windshear",
+  "h5_path": "C:\\Users\\g.garsed\\Documents\\homologations\\Ferrari_10-2025_windshear_&\\data\\Ferrari_10-2025_windshear_&.h5"
+}

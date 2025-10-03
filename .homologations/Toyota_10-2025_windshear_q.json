@@ -1,0 +1,14 @@
+{
+  "manufacturer": "Toyota",
+  "homologation_date": "2025-10-01",
+  "session_name": "Toyota_10-2025_windshear_q",
+  "name_identifier": "q",
+  "base_folder": "C:\\Users\\g.garsed\\Documents\\homologations",
+  "reference_folder": "C:\\Users\\g.garsed\\Documents\\homologations\\Toyota_10-2025_windshear_q",
+  "wt_maps": "C:\\Users\\g.garsed\\Documents\\homologations\\Toyota_10-2025_windshear_q\\wt_maps",
+  "data": "C:\\Users\\g.garsed\\Documents\\homologations\\Toyota_10-2025_windshear_q\\data",
+  "raw": "C:\\Users\\g.garsed\\Documents\\homologations\\Toyota_10-2025_windshear_q\\data\\raw",
+  "data_source_folder": "C:\\Users\\g.garsed\\Documents\\wt_tool_testing\\data_souce",
+  "wind_tunnel": "windshear",
+  "h5_path": "C:\\Users\\g.garsed\\Documents\\homologations\\Toyota_10-2025_windshear_q\\data\\Toyota_10-2025_windshear_q.h5"
+}

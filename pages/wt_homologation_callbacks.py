@@ -18,7 +18,7 @@ LBF_TO_NEWTONS = 4.44822
 def _get_attr_str(arr):
     return [v.decode() if isinstance(v, (bytes, bytearray)) else v for v in arr]
 
-def compute_weighted_coeffs_from_d1_processed(run_grp):
+def compute_weighted_coeffs_from_d1_processed(run_grp, map_name=None):
     """Compute weighted_Cz and weighted_Cx based on d1_processed dataset and store as run attributes.
 
     Given:
@@ -30,7 +30,10 @@ def compute_weighted_coeffs_from_d1_processed(run_grp):
     - CD = (D - drag_tare) * LBF_TO_NEWTONS / (DYNPR * PSF_TO_PA)
     - min_CD = minimum CD from rows with valid (non-NaN) w_cx
     - CDW = CD * w_cx (only for valid measurements)
-      weighted_Cx = sum(CDW) / sum(ALL w_cx from map) + 0.2 * min_CD
+    
+    Weighted Cx calculation depends on map_name:
+    - For 'short' map: weighted_Cx = sum(CDW) / 100
+    - For other maps: weighted_Cx = sum(CDW) / 100 + 0.2 * min_CD
     
     Note: Weight sums include ALL valid weights from the map, not just those with valid measurements.
     """
@@ -124,6 +127,12 @@ def compute_weighted_coeffs_from_d1_processed(run_grp):
             if not np.isnan(wcx):
                 wcx_sum += wcx
             
+            # Initialize for debug
+            cl = float('nan')
+            cd = float('nan')
+            clw = float('nan')
+            cdw = float('nan')
+
             # Calculate CL (Coefficient of Lift) first
             if not (np.isnan(L) or np.isnan(lift_tare) or np.isnan(dynpr) or dynpr == 0):
                 cl = (L - lift_tare) * LBF_TO_NEWTONS / (dynpr * PSF_TO_PA)
@@ -137,11 +146,25 @@ def compute_weighted_coeffs_from_d1_processed(run_grp):
                 if not np.isnan(cd) and not np.isnan(wcx):
                     cdw = cd * wcx  # CDW = CD * w_cx (back to original formula)
                     cdw_sum += cdw
+
+            # Per-row debug for short map
+            if map_name == "short":
+                try:
+                    print(f"[WT][short][weighted pass] r={r} CL={cl:.6f} w_cz={wcz} CLW={clw if not np.isnan(clw) else 'nan'} | CD={cd:.6f} w_cx={wcx} CDW={cdw if not np.isnan(cdw) else 'nan'}")
+                except Exception:
+                    pass
         
         # Final weighted values are normalized by the sum of weights
         weighted_cz = float(clw_sum / wcz_sum) if (wcz_sum != 0.0 and not np.isnan(wcz_sum)) else 0.0
         weighted_cx_base = float(cdw_sum / 100.0)  # Normalize by 100 instead of wcx_sum
-        weighted_cx = weighted_cx_base + 0.2 * min_cd  # Add 20% of minimum CD to final weighted_Cx
+        
+        # Apply map-specific Cx calculation
+        if map_name == "short":
+            # For 'short' map: no 20% minimum offset
+            weighted_cx = weighted_cx_base
+        else:
+            # For 'homologation' and other maps: add 20% of minimum CD
+            weighted_cx = weighted_cx_base + 0.2 * min_cd
         
         # Round to 3 decimal places (4th decimal will be zero)
         weighted_cz = round(weighted_cz, 3)
@@ -155,7 +178,11 @@ def compute_weighted_coeffs_from_d1_processed(run_grp):
             run_name = run_grp.name.split('/')[-1]
         except Exception:
             run_name = str(run_grp)
-        print(f"[WT] Run '{run_name}': weighted_Cz={weighted_cz:.6f}, weighted_Cx_base={weighted_cx_base:.6f}, min_CD_offset={0.2 * min_cd:.6f}, weighted_Cx={weighted_cx:.6f}")
+        map_label = f" (map: {map_name})" if map_name else ""
+        if map_name == "short":
+            print(f"[WT] Run '{run_name}'{map_label}: weighted_Cz={weighted_cz:.6f}, weighted_Cx={weighted_cx:.6f} (base={weighted_cx_base:.6f}, no offset)")
+        else:
+            print(f"[WT] Run '{run_name}'{map_label}: weighted_Cz={weighted_cz:.6f}, weighted_Cx_base={weighted_cx_base:.6f}, min_CD_offset={0.2 * min_cd:.6f}, weighted_Cx={weighted_cx:.6f}")
         
         # Return success message with minimum CD info
         success_msg = f"Minimum CD: {min_cd:.6f} at ride height '{min_cd_setpoint}'"
@@ -462,6 +489,13 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
                         if not np.isnan(wcx):
                             cdw = cd * wcx  # CDW = CD * w_cx (back to original formula)
                             cdw_val = f"{cdw:.6f}"
+                
+                # Per-row debug for short map while building d1_processed
+                if map_name == "short":
+                    try:
+                        print(f"[WT][short][d1_processed] i={i} sp={sp_name} L={L} D={D} DYNPR={dynpr} w_cz={wcz} w_cx={wcx} CL={cl_val} CD={cd_val} CLW={clw_val} CDW={cdw_val}")
+                    except Exception:
+                        pass
                         
             except Exception as e:
                 print(f"Error calculating CL/CD/CLW/CDW for row {i}: {e}")
@@ -754,7 +788,7 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                                 # Store column names as attributes
                                 d1_processed_ds.attrs["columns"] = np.array(combined_columns, dtype='S50')
                                 # Compute weighted coefficients and store on run
-                                ok, min_cd_msg = compute_weighted_coeffs_from_d1_processed(run_grp)
+                                ok, min_cd_msg = compute_weighted_coeffs_from_d1_processed(run_grp, map_name=selected_map)
                                 if not ok:
                                     message = (message + f"; {min_cd_msg}") if message else min_cd_msg
                                 else:
@@ -1114,7 +1148,7 @@ def save_table_changes(table_data, homologation):
                                         d1_processed_ds = run_grp.create_dataset("d1_processed", data=combined_array)
                                         d1_processed_ds.attrs["description"] = f"Setpoints from map: {old_map} with d1 data columns"
                                         d1_processed_ds.attrs["columns"] = np.array(combined_columns, dtype='S50')
-                                        compute_weighted_coeffs_from_d1_processed(run_grp)
+                                        compute_weighted_coeffs_from_d1_processed(run_grp, map_name=old_map)
                                 return f"Error: map has {map_rows} rows but d1 has {d1_rows} rows. Map remains: {old_map}"
 
                             # Create combined data with map setpoints and d1 columns
@@ -1124,7 +1158,7 @@ def save_table_changes(table_data, homologation):
                                 d1_processed_ds = run_grp.create_dataset("d1_processed", data=combined_array)
                                 d1_processed_ds.attrs["description"] = f"Setpoints from map: {new_map} with d1 data columns"
                                 d1_processed_ds.attrs["columns"] = np.array(combined_columns, dtype='S50')
-                                ok, min_cd_msg = compute_weighted_coeffs_from_d1_processed(run_grp)
+                                ok, min_cd_msg = compute_weighted_coeffs_from_d1_processed(run_grp, map_name=new_map)
                                 if not ok:
                                     return min_cd_msg
                                 else:

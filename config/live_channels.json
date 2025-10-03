@@ -21,6 +21,18 @@
     "YM",
     "RM"
   ],
+  "TYRES FY": [
+    "FYLF",
+    "FYRF",
+    "FYLR",
+    "FYRR"
+  ],
+  "TYRES FX": [
+    "FXLF",
+    "FXRF",
+    "FXLR",
+    "FXRR"
+  ],
   "WT 1": [
     "DYNPR",
     "RRS Speed Feedback",
@@ -34,15 +46,15 @@
     "RRS RR Roller Bearing Temp"
   ],
   "Tyre Pressure": [
-    "CAN_37_pTireFL",
-    "CAN_37_pTireFR",
-    "CAN_37_pTireRL",
-    "CAN_37_pTireRR"
+    "CAN_79_TirePressLF",
+    "CAN_79_TirePressRF",
+    "CAN_79_TirePressLR",
+    "CAN_79_TirePressRR"
   ],
   "Upright Temperature": [
-    "CAN_37_TUprightFL",
-    "CAN_37_TUprightFR",
-    "CAN_37_TUprightRL",
-    "CAN_37_TUprightRR"
+    "CAN_79_UprightTempLF",
+    "CAN_79_UprightTempRF",
+    "CAN_79_UprightTempLR",
+    "CAN_79_UprightTempRR"
   ]
 }

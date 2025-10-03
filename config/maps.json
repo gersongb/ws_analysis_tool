@@ -72,5 +72,20 @@
       {"setpoint": "ZeroD1", "road_speed": 60, "wind_speed": 0, "frh": 50, "rrh": 80, "roll": 0, "yaw": 0, "w_cx": null, "w_cz": null},
       {"setpoint": "ZeroD2", "road_speed": 50, "wind_speed": 0, "frh": 50, "rrh": 80, "roll": 0, "yaw": 0, "w_cx": null, "w_cz": null},
       {"setpoint": "ZeroL", "road_speed": 2, "wind_speed": 0, "frh": 50, "rrh": 80, "roll": 0, "yaw": 0, "w_cx": null, "w_cz": null}
+  ],
+  "short": [
+      {"setpoint": "PreZeroD", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 0.0, "yaw": 0.0, "w_cx": null, "w_cz": null},
+      {"setpoint": "First", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 1.2, "yaw": -5.0, "w_cx": 1.5, "w_cz": 13.0},
+      {"setpoint": "S01", "road_speed": 60, "wind_speed": 60, "frh": 55, "rrh": 65, "roll": 1.2, "yaw": -5.0, "w_cx": 1.5, "w_cz": 13.0},
+      {"setpoint": "S02", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 65, "roll": 1.2, "yaw": -3.0, "w_cx": 18.0, "w_cz": 12.0},
+      {"setpoint": "S03", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 1.2, "yaw": -3.0, "w_cx": 2.0, "w_cz": 12.0},
+      {"setpoint": "S04", "road_speed": 60, "wind_speed": 60, "frh": 30, "rrh": 30, "roll": 0.0, "yaw": 0.0, "w_cx": 25.0, "w_cz": 0.0},
+      {"setpoint": "S05", "road_speed": 60, "wind_speed": 60, "frh": 35, "rrh": 40, "roll": 0.0, "yaw": 0.0, "w_cx": 20.0, "w_cz": 3.0},
+      {"setpoint": "S06", "road_speed": 60, "wind_speed": 60, "frh": 40, "rrh": 50, "roll": 0.0, "yaw": 0.0, "w_cx": 27.0, "w_cz": 12.0},
+      {"setpoint": "S07", "road_speed": 60, "wind_speed": 60, "frh": 45, "rrh": 70, "roll": 0.0, "yaw": 0.0, "w_cx": 4.0, "w_cz": 19.0},
+      {"setpoint": "S08", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 0.0, "yaw": 0.0, "w_cx": 1.0, "w_cz": 16.0},
+      {"setpoint": "Last", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 1.2, "yaw": -5.0, "w_cx": 0.000, "w_cz": 0.000},
+      {"setpoint": "ZeroD1", "road_speed": 60, "wind_speed": 0, "frh": 50, "rrh": 80, "roll": 0.0, "yaw": 0.0, "w_cx": null, "w_cz": null},
+      {"setpoint": "ZeroL", "road_speed": 2, "wind_speed": 0, "frh": 50, "rrh": 80, "roll": 0.0, "yaw": 0.0, "w_cx": null, "w_cz": null}
   ]
 }

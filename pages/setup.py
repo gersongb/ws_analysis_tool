@@ -56,7 +56,15 @@ layout = dbc.Container([
     dbc.Row([
         dbc.Col([
             html.H4("Load Existing Homologation"),
-            dcc.Dropdown(id="load-homologation-dropdown", options=get_homologation_options(), placeholder="Select a homologation to load"),
+            html.Label("Browse and select homologation folder:"),
+            html.Br(),
+            dcc.Input(
+                id="load-homologation-path", 
+                type="text", 
+                placeholder="Enter or paste full path to homologation reference folder", 
+                style={"width": "90%", "marginBottom": "10px"}
+            ),
+            html.Br(),
             dbc.Button("Load", id="load-homologation-btn", color="primary", n_clicks=0, style={"marginTop": "10px"}),
             html.Div(id="load-homologation-feedback", style={"marginTop": "10px", "color": "#008800"}),
         ], width=6),
@@ -135,7 +143,6 @@ def keep_info_panel_in_sync(data):
 @dash.callback(
     Output("create-homologation-feedback", "children"),
     Output("load-homologation-feedback", "children"),
-    Output("load-homologation-dropdown", "options"),
     Output("modify-data-source-folder-feedback", "children"),
     Output("current-homologation-store", "data"),
     Input("create-homologation-btn", "n_clicks"),
@@ -147,14 +154,14 @@ def keep_info_panel_in_sync(data):
     State("data-source-folder", "value"),
     State("wind-tunnel-dropdown", "value"),
     State("name-identifier", "value"),
-    State("load-homologation-dropdown", "value"),
+    State("load-homologation-path", "value"),
     State("modify-data-source-folder-input", "value"),
     State("current-homologation-store", "data"),
     prevent_initial_call=True
 )
 def unified_homologation_callback(
     create_n, load_n, modify_n,
-    manufacturer, homologation_date, new_base, data_source_folder, wind_tunnel, name_identifier, load_value,
+    manufacturer, homologation_date, new_base, data_source_folder, wind_tunnel, name_identifier, load_path,
     modify_folder_value, current_data
 ):
     import dash
@@ -165,11 +172,10 @@ def unified_homologation_callback(
     load_msg = ""
     modify_msg = dash.no_update
     info_panel = dash.no_update
-    dropdown_options = get_homologation_options()
     data = current_data
 
     if not ctx.triggered:
-        return "", "", dropdown_options, dash.no_update, dash.no_update
+        return "", "", dash.no_update, dash.no_update
 
     button_id = ctx.triggered[0]["prop_id"].split(".")[0]
 
@@ -183,7 +189,7 @@ def unified_homologation_callback(
                 session_name = f"{manufacturer}_{date_obj.strftime('%m-%Y')}_{wind_tunnel}_{name_identifier}"
             except Exception:
                 create_msg = "Invalid date format."
-                return create_msg, load_msg, dropdown_options, modify_msg, data
+                return create_msg, load_msg, modify_msg, data
             ref_folder_name = session_name.replace(" ", "_")
             ref_folder = os.path.join(new_base, ref_folder_name)
             import shutil
@@ -247,27 +253,54 @@ def unified_homologation_callback(
                 # Only set a success message if not already set by a maps/HDF5 warning above
                 if not create_msg:
                     create_msg = f"Created homologation '{session_name}'"
-                dropdown_options = get_homologation_options()
             except Exception as e:
                 create_msg = f"Failed to save homologation: {e}"
 
     # Load Homologation
     elif button_id == "load-homologation-btn":
-        if not load_value:
-            load_msg = "Please select a homologation to load."
+        if not load_path:
+            load_msg = "Please enter a path to a homologation reference folder."
         else:
-            loaded = load_homologation_data(load_value)
-            if loaded:
-                # Add h5_path if not present
-                session_name = loaded.get("session_name")
-                data_path = loaded.get("data")
-                if session_name and data_path:
-                    h5_path = os.path.join(data_path, f"{session_name}.h5")
-                    loaded["h5_path"] = h5_path
-                load_msg = f"Loaded homologation '{loaded.get('session_name', load_value)}'"
-                data = loaded
+            # Ensure the path is absolute and exists
+            abs_path = os.path.abspath(load_path)
+            if not os.path.exists(abs_path):
+                load_msg = f"Folder not found: {abs_path}"
+            elif not os.path.isdir(abs_path):
+                load_msg = "Please select a folder, not a file."
             else:
-                load_msg = "Failed to load homologation."
+                try:
+                    # Look for HDF5 file in the data subfolder
+                    data_folder = os.path.join(abs_path, "data")
+                    if not os.path.exists(data_folder):
+                        load_msg = f"'data' folder not found in: {abs_path}"
+                    else:
+                        # Find the .h5 file in data folder
+                        h5_files = [f for f in os.listdir(data_folder) if f.endswith(".h5")]
+                        if not h5_files:
+                            load_msg = f"No .h5 file found in: {data_folder}"
+                        else:
+                            h5_path = os.path.join(data_folder, h5_files[0])
+                            # Read setup data from HDF5 file
+                            import h5py
+                            try:
+                                with h5py.File(h5_path, "r") as h5f:
+                                    if 'setup_json' in h5f.attrs:
+                                        setup_json = h5f.attrs['setup_json']
+                                        if isinstance(setup_json, bytes):
+                                            setup_json = setup_json.decode('utf-8')
+                                        loaded = json.loads(setup_json)
+                                        # Ensure h5_path is set
+                                        loaded["h5_path"] = h5_path
+                                        # Update reference_folder to the provided path
+                                        loaded["reference_folder"] = abs_path
+                                        load_msg = f"Loaded homologation '{loaded.get('session_name', os.path.basename(abs_path))}'"
+                                        data = loaded
+                                    else:
+                                        load_msg = "HDF5 file does not contain 'setup_json' attribute."
+                            except Exception as e:
+                                load_msg = f"Failed to read HDF5 file: {e}"
+                except Exception as e:
+                    load_msg = f"Failed to load homologation: {e}"
 
     # Modify Data Source Folder
     elif button_id == "modify-data-source-folder-btn":
@@ -305,5 +338,5 @@ def unified_homologation_callback(
                     modify_msg = f"Failed to update: {e}"
 
     # Always update info panel
-    # info_panel is not an output; return only 5 values as required
-    return create_msg, load_msg, dropdown_options, modify_msg, data
+    # Return 4 values as required
+    return create_msg, load_msg, modify_msg, data
