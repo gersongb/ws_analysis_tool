@@ -3,6 +3,7 @@ from dash import html, dcc
 import dash_bootstrap_components as dbc
 import dash
 import os
+import argparse
 
 # Multi-page support
 app = dash.Dash(__name__, use_pages=True, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
@@ -19,4 +20,9 @@ app.layout = dbc.Container([
 ], fluid=True)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    parser = argparse.ArgumentParser(description='Wind Tunnel Analysis Tool')
+    parser.add_argument('--port', type=int, default=8050, help='Port to run the app on (default: 8050)')
+    parser.add_argument('--host', type=str, default='127.0.0.1', help='Host to run the app on (default: 127.0.0.1)')
+    args = parser.parse_args()
+    
+    app.run(debug=True, port=args.port, host=args.host)

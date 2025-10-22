@@ -1,0 +1,14 @@
+{
+  "manufacturer": "Porsche",
+  "homologation_date": "2025-10-20",
+  "session_name": "Porsche_10-2025_windshear_test",
+  "name_identifier": "test",
+  "base_folder": "C:\\Users\\g.garsed\\Documents\\wt_homologation",
+  "reference_folder": "C:\\Users\\g.garsed\\Documents\\wt_homologation\\Porsche_10-2025_windshear_test",
+  "wt_maps": "C:\\Users\\g.garsed\\Documents\\wt_homologation\\Porsche_10-2025_windshear_test\\wt_maps",
+  "data": "C:\\Users\\g.garsed\\Documents\\wt_homologation\\Porsche_10-2025_windshear_test\\data",
+  "raw": "C:\\Users\\g.garsed\\Documents\\wt_homologation\\Porsche_10-2025_windshear_test\\data\\raw",
+  "data_source_folder": "C:\\Users\\g.garsed\\Documents\\wt_homologation\\Live Data",
+  "wind_tunnel": "windshear",
+  "h5_path": "C:\\Users\\g.garsed\\Documents\\wt_homologation\\Porsche_10-2025_windshear_test\\data\\Porsche_10-2025_windshear_test.h5"
+}

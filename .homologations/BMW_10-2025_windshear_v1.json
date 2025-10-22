@@ -1,0 +1,14 @@
+{
+  "manufacturer": "BMW",
+  "homologation_date": "2025-10-22",
+  "session_name": "BMW_10-2025_windshear_v1",
+  "name_identifier": "v1",
+  "base_folder": "C:\\Users\\g.garsed\\Documents\\homologations",
+  "reference_folder": "C:\\Users\\g.garsed\\Documents\\homologations\\BMW_10-2025_windshear_v1",
+  "wt_maps": "C:\\Users\\g.garsed\\Documents\\homologations\\BMW_10-2025_windshear_v1\\wt_maps",
+  "data": "C:\\Users\\g.garsed\\Documents\\homologations\\BMW_10-2025_windshear_v1\\data",
+  "raw": "C:\\Users\\g.garsed\\Documents\\homologations\\BMW_10-2025_windshear_v1\\data\\raw",
+  "data_source_folder": "X:\\",
+  "wind_tunnel": "windshear",
+  "h5_path": "C:\\Users\\g.garsed\\Documents\\homologations\\BMW_10-2025_windshear_v1\\data\\BMW_10-2025_windshear_v1.h5"
+}

@@ -19,7 +19,7 @@ layout = dbc.Container([
     # Interval to refresh dropdowns periodically
     dcc.Interval(id="live-wt-refresh-interval", interval=5000, n_intervals=0),
     # Interval to run live copying (disabled until toggle on)
-    dcc.Interval(id="live-wt-copy-interval", interval=30000, n_intervals=0, disabled=True),
+    dcc.Interval(id="live-wt-copy-interval", interval=20000, n_intervals=0, disabled=True),
     # Interval to refresh plots (always on) every 10s
     dcc.Interval(id="live-wt-plot-refresh-interval", interval=10000, n_intervals=0),
 
@@ -64,15 +64,33 @@ layout = dbc.Container([
         # Status/debug message
         html.Div(id="live-wt-status", style={"marginBottom": "10px", "fontSize": "0.9rem", "color": "#666"}),
 
-        # Tabs container (top)
+        # Performance Window (at top)
         dbc.Container([
-            dcc.Tabs(id="live-wt-tabs-top")
+            html.Div("Performance Window", style={"fontWeight": "bold", "marginBottom": "10px", "textAlign": "center", "fontSize": "1.2rem"}),
+            html.Div(
+                dcc.Graph(
+                    id="live-wt-homologation-plot",
+                    style={"width": "80%", "height": "100%", "minHeight": "0"},
+                    config={"responsive": True}
+                ),
+                style={
+                    "display": "flex",
+                    "justifyContent": "center",
+                    "alignItems": "center",
+                    "height": "600px"
+                }
+            ),
+            html.Div(id="live-wt-homologation-feedback", style={"marginTop": "10px", "color": "#cc0000", "textAlign": "center"})
         ], fluid=True, style={"padding": "20px", "border": "1px solid #ddd", "borderRadius": "5px", "marginBottom": "16px"}),
 
-        # Second container with duplicated tabs (as requested)
+        # Tabs container
         dbc.Container([
-            dcc.Tabs(id="live-wt-tabs-bottom")
-        ], fluid=True, style={"padding": "20px", "border": "1px solid #ddd", "borderRadius": "5px"})
+            dcc.Tabs(
+                id="live-wt-tabs-bottom",
+                persistence=True,
+                persistence_type="session"
+            )
+        ], fluid=True, style={"padding": "20px", "border": "1px solid #ddd", "borderRadius": "5px", "marginBottom": "16px"})
     ], fluid=True, style={"padding": "20px", "border": "1px solid #ddd", "borderRadius": "5px"})
 ], fluid=True)
 
@@ -190,11 +208,14 @@ def handle_live_comparison(homologation, toggle_values, ref_folder, live_folder)
     prevent_initial_call=True
 )
 def perform_periodic_live_copy(n, homologation, toggle_values, ref_folder, live_folder):
+    print(f"[Live WT] Copy callback triggered: n={n}")
     if not homologation or not toggle_values or ("on" not in toggle_values):
+        print(f"[Live WT] Copy skipped: toggle off or no homologation")
         return dash.no_update
     base_folder = homologation.get("base_folder")
     data_src = homologation.get("data_source_folder")
     if not base_folder or not data_src or not live_folder:
+        print(f"[Live WT] Copy skipped: missing paths")
         return dash.no_update
 
     live_data_path = os.path.join(base_folder, "Live Data")
@@ -205,8 +226,10 @@ def perform_periodic_live_copy(n, homologation, toggle_values, ref_folder, live_
         if os.path.isfile(live_d1_src) and os.path.isdir(live_data_path):
             shutil.copyfile(live_d1_src, live_target)
             ts = datetime.now().strftime("%H:%M:%S")
+            print(f"[Live WT] ✓ File copied at {ts}: {live_d1_src} → {live_target}")
             return f"Live Comparison running. Last update: {ts}"
     except Exception as e:
+        print(f"[Live WT] ✗ Copy failed: {e}")
         return f"Live copy failed: {e}"
     return dash.no_update
 
@@ -305,7 +328,317 @@ def _build_tabs_content(ref_path, live_path, refresh_token=None):
 
 
 @callback(
-    Output("live-wt-tabs-top", "children"),
+    Output("live-wt-homologation-plot", "figure"),
+    Output("live-wt-homologation-feedback", "children"),
+    Input("current-homologation-store", "data"),
+    Input("live-wt-plot-refresh-interval", "n_intervals"),
+    Input("live-wt-comparison-toggle", "value"),
+    Input("live-wt-reference-dropdown", "value"),
+    Input("live-wt-live-dropdown", "value"),
+    prevent_initial_call=False
+)
+def update_live_homologation_plot(homologation_data, _plot_tick, toggle_values, ref_folder, live_folder):
+    """Update the homologation window plot with reference and live data points."""
+    from datetime import datetime
+    print(f"\n[Live WT] === Plot callback triggered at {datetime.now().strftime('%H:%M:%S')} | tick={_plot_tick} ===")
+    
+    if not homologation_data or "reference_folder" not in homologation_data:
+        return go.Figure(), "No homologation loaded."
+    
+    wt_json_path = os.path.join(homologation_data["reference_folder"], "config", "wt.json")
+    if not os.path.exists(wt_json_path):
+        return go.Figure(), f"wt.json not found at {wt_json_path}"
+    
+    try:
+        with open(wt_json_path, "r") as f:
+            wt_data = json.load(f)
+        windshear = wt_data.get("windshear")
+        if not windshear:
+            return go.Figure(), "wt.json missing 'windshear' key."
+        cx = windshear.get("Cx")
+        cz = windshear.get("Cz")
+        if cx is None or cz is None:
+            return go.Figure(), "Missing 'Cx' or 'Cz' in 'windshear'."
+        if not isinstance(cx, list) or not isinstance(cz, list):
+            return go.Figure(), "'Cx' and 'Cz' must be lists."
+        if len(cx) != len(cz):
+            return go.Figure(), "'Cx' and 'Cz' lengths do not match."
+        if len(cx) == 0:
+            return go.Figure(), "'Cx' and 'Cz' are empty."
+        
+        # Create figure with performance window
+        fig = go.Figure(data=go.Scatter(x=cx, y=cz, mode='lines+markers', name='Performance Window', 
+                                       line=dict(color='black'), showlegend=True))
+        
+        # Track min/max for axis ranges
+        x_min, x_max = min(cx), max(cx)
+        y_min, y_max = min(cz), max(cz)
+        
+        # If live comparison is active, add reference and live data points
+        if toggle_values and ("on" in toggle_values) and homologation_data.get("h5_path"):
+            h5_path = homologation_data["h5_path"]
+            
+            # Load weighted values from HDF5 imported runs table
+            try:
+                import h5py
+                with h5py.File(h5_path, "r") as h5f:
+                    if "wt_runs" in h5f:
+                        # Initialize variables
+                        ref_wcx, ref_wcz, ref_ocx, ref_ocz = None, None, None, None
+                        live_wcx, live_wcz, live_ocx, live_ocz = None, None, None, None
+                        final_ref_cx, final_ref_cz = None, None
+                        
+                        # Helper function to get attributes from HDF5
+                        def get_run_weighted_values(run_name):
+                            if run_name not in h5f["wt_runs"]:
+                                return None, None, None, None
+                            run_attrs = h5f["wt_runs"][run_name].attrs
+                            try:
+                                weighted_cx = float(run_attrs.get("weighted_Cx", 0.0))
+                                weighted_cz = float(run_attrs.get("weighted_Cz", 0.0))
+                                offset_cx = float(run_attrs.get("offset_Cx", 0.0))
+                                offset_cz = float(run_attrs.get("offset_Cz", 0.0))
+                                return weighted_cx, weighted_cz, offset_cx, offset_cz
+                            except (ValueError, TypeError):
+                                return None, None, None, None
+                        
+                        # Get reference run values
+                        if ref_folder:
+                            ref_wcx, ref_wcz, ref_ocx, ref_ocz = get_run_weighted_values(ref_folder)
+                            if ref_wcx is not None and ref_wcz is not None:
+                                # Apply offsets
+                                final_ref_cx = ref_wcx + ref_ocx
+                                final_ref_cz = ref_wcz + ref_ocz
+                                
+                                # Add reference point
+                                fig.add_trace(go.Scatter(
+                                    x=[final_ref_cx],
+                                    y=[-final_ref_cz],  # Reverse sign for Cz
+                                    mode='markers',
+                                    name='Reference',
+                                    marker=dict(color='blue', size=12, symbol='circle'),
+                                    text=[f"Ref: {ref_folder}"],
+                                    hovertemplate='<b>%{text}</b><br>Cx: %{x:.4f}<br>Cz: %{y:.4f}<extra></extra>'
+                                ))
+                                
+                                # Update axis ranges
+                                x_min = min(x_min, final_ref_cx)
+                                x_max = max(x_max, final_ref_cx)
+                                y_min = min(y_min, -final_ref_cz)
+                                y_max = max(y_max, -final_ref_cz)
+                        
+                        # Get live run values
+                        if live_folder:
+                            live_wcx, live_wcz, live_ocx, live_ocz = get_run_weighted_values(live_folder)
+                            if live_wcx is not None and live_wcz is not None:
+                                # Apply offsets
+                                final_live_cx = live_wcx + live_ocx
+                                final_live_cz = live_wcz + live_ocz
+                                
+                                # Add live point
+                                fig.add_trace(go.Scatter(
+                                    x=[final_live_cx],
+                                    y=[-final_live_cz],  # Reverse sign for Cz
+                                    mode='markers',
+                                    name='Live',
+                                    marker=dict(color='red', size=12, symbol='diamond'),
+                                    text=[f"Live: {live_folder}"],
+                                    hovertemplate='<b>%{text}</b><br>Cx: %{x:.4f}<br>Cz: %{y:.4f}<extra></extra>'
+                                ))
+                                
+                                # Update axis ranges
+                                x_min = min(x_min, final_live_cx)
+                                x_max = max(x_max, final_live_cx)
+                                y_min = min(y_min, -final_live_cz)
+                                y_max = max(y_max, -final_live_cz)
+                        
+                        # Compute predicted live performance based on L and D corrections
+                        print(f"[Live WT] Checking prediction conditions: ref={ref_folder}, live={live_folder}, ref_wcx={ref_wcx}, ref_wcz={ref_wcz}, final_ref_cx={final_ref_cx}, final_ref_cz={final_ref_cz}")
+                        if ref_folder and live_folder and ref_wcx is not None and ref_wcz is not None and final_ref_cx is not None and final_ref_cz is not None:
+                            print(f"[Live WT] Attempting to compute prediction...")
+                            try:
+                                # Load reference d1_processed data to get L, D, and weights
+                                if ref_folder in h5f["wt_runs"] and "d1_processed" in h5f["wt_runs"][ref_folder]:
+                                    ref_ds = h5f["wt_runs"][ref_folder]["d1_processed"]
+                                    ref_cols = [col.decode() if isinstance(col, bytes) else col 
+                                               for col in ref_ds.attrs.get("columns", [])]
+                                    ref_data = ref_ds[:]
+                                    
+                                    # Find column indices
+                                    def find_col_idx(cols, name):
+                                        try:
+                                            return cols.index(name)
+                                        except ValueError:
+                                            return None
+                                    
+                                    L_idx = find_col_idx(ref_cols, "L")
+                                    D_idx = find_col_idx(ref_cols, "D")
+                                    wcx_idx = find_col_idx(ref_cols, "w_cx")
+                                    wcz_idx = find_col_idx(ref_cols, "w_cz")
+                                    frh_idx = find_col_idx(ref_cols, "frh")
+                                    rrh_idx = find_col_idx(ref_cols, "rrh")
+                                    
+                                    print(f"[Live WT] Column indices: L={L_idx}, D={D_idx}, wcx={wcx_idx}, wcz={wcz_idx}, frh={frh_idx}, rrh={rrh_idx}")
+                                    if all(idx is not None for idx in [L_idx, D_idx, wcx_idx, wcz_idx]):
+                                        print(f"[Live WT] All columns found, extracting arrays from {len(ref_data)} rows")
+                                        # Extract reference arrays (don't filter, just convert)
+                                        ref_L = np.array([float(row[L_idx]) if row[L_idx] else 0.0 for row in ref_data])
+                                        ref_D = np.array([float(row[D_idx]) if row[D_idx] else 0.0 for row in ref_data])
+                                        ref_wcx_weights = np.array([float(row[wcx_idx]) if row[wcx_idx] else 0.0 for row in ref_data])
+                                        ref_wcz_weights = np.array([float(row[wcz_idx]) if row[wcz_idx] else 0.0 for row in ref_data])
+                                        print(f"[Live WT] Extracted arrays: L={len(ref_L)}, D={len(ref_D)}, wcx={len(ref_wcx_weights)}, wcz={len(ref_wcz_weights)}")
+                                        
+                                        # Load live L and D from locally copied file
+                                        live_L = None
+                                        live_D = None
+                                        
+                                        base_folder = homologation_data.get("base_folder")
+                                        print(f"[Live WT] Base folder: {base_folder}")
+                                        if base_folder:
+                                            live_data_dir = os.path.join(base_folder, "Live Data")
+                                            live_d1_path = os.path.join(live_data_dir, "Live_D1.asc")
+                                            print(f"[Live WT] Looking for live d1 at: {live_d1_path}")
+                                            if os.path.exists(live_d1_path):
+                                                # Check file modification time
+                                                import time
+                                                mod_time = os.path.getmtime(live_d1_path)
+                                                print(f"[Live WT] Live d1 file exists | Last modified: {time.ctime(mod_time)} | Size: {os.path.getsize(live_d1_path)} bytes")
+                                                
+                                                # Force fresh read by opening file directly
+                                                live_series = _load_d1_series(live_d1_path)
+                                                print(f"[Live WT] Live series columns: {list(live_series.keys())}")
+                                                if "L" in live_series and "D" in live_series:
+                                                    live_L = live_series["L"]
+                                                    live_D = live_series["D"]
+                                                    print(f"[Live WT] Loaded live L and D: {len(live_L)} rows | L[0]={live_L[0] if len(live_L) > 0 else 'N/A'}")
+                                                else:
+                                                    print(f"[Live WT] L or D not found in live series")
+                                            else:
+                                                print(f"[Live WT] Live d1 file does not exist (toggle may be off or not copied yet)")
+                                        else:
+                                            print(f"[Live WT] Missing base_folder")
+                                        
+                                        # If live data is available, use comparable rows only
+                                        print(f"[Live WT] Checking dimensions: live_L={len(live_L) if live_L is not None else 'None'}, ref_L={len(ref_L)}, live_D={len(live_D) if live_D is not None else 'None'}, ref_D={len(ref_D)}")
+                                        if live_L is not None and live_D is not None and len(live_L) > 0 and len(live_D) > 0:
+                                            # Handle partial data: only use rows available in both datasets
+                                            n_comparable = min(len(live_L), len(ref_L), len(live_D), len(ref_D), len(ref_wcx_weights), len(ref_wcz_weights))
+                                            print(f"[Live WT] Using {n_comparable} comparable rows (partial data handling)")
+                                            
+                                            if n_comparable > 0:
+                                                # Slice arrays to comparable length
+                                                ref_L_comp = ref_L[:n_comparable]
+                                                ref_D_comp = ref_D[:n_comparable]
+                                                live_L_comp = live_L[:n_comparable]
+                                                live_D_comp = live_D[:n_comparable]
+                                                ref_wcx_weights_comp = ref_wcx_weights[:n_comparable]
+                                                ref_wcz_weights_comp = ref_wcz_weights[:n_comparable]
+                                                
+                                                # Find the row with FRH=30 and RRH=30 to apply additional 20% weight
+                                                frh30_rrh30_row = None
+                                                if frh_idx is not None and rrh_idx is not None:
+                                                    try:
+                                                        # Search for FRH=30 and RRH=30 in comparable rows
+                                                        for i in range(n_comparable):
+                                                            frh_val = float(ref_data[i][frh_idx]) if ref_data[i][frh_idx] else 0.0
+                                                            rrh_val = float(ref_data[i][rrh_idx]) if ref_data[i][rrh_idx] else 0.0
+                                                            
+                                                            if abs(frh_val - 30.0) < 0.1 and abs(rrh_val - 30.0) < 0.1:
+                                                                frh30_rrh30_row = i
+                                                                print(f"[Live WT] Found FRH=30, RRH=30 at row {i}")
+                                                                break
+                                                    except Exception as e:
+                                                        print(f"[Live WT] Error finding FRH=30, RRH=30 row: {e}")
+                                                
+                                                # Adjust Cx weights: add 20% extra weight to FRH=30, RRH=30 row
+                                                adjusted_wcx_weights = ref_wcx_weights_comp.copy()
+                                                if frh30_rrh30_row is not None:
+                                                    adjusted_wcx_weights[frh30_rrh30_row] += 20.0
+                                                    print(f"[Live WT] Added 20% weight to row {frh30_rrh30_row}: original={ref_wcx_weights_comp[frh30_rrh30_row]:.2f}, adjusted={adjusted_wcx_weights[frh30_rrh30_row]:.2f}")
+                                                
+                                                # Normalize weights to sum to 100
+                                                wcz_sum = np.sum(ref_wcz_weights_comp)
+                                                wcx_sum = np.sum(adjusted_wcx_weights)
+                                                
+                                                if wcz_sum > 0:
+                                                    normalized_wcz = (ref_wcz_weights_comp / wcz_sum) * 100
+                                                else:
+                                                    normalized_wcz = ref_wcz_weights_comp
+                                                
+                                                if wcx_sum > 0:
+                                                    normalized_wcx = (adjusted_wcx_weights / wcx_sum) * 100
+                                                else:
+                                                    normalized_wcx = adjusted_wcx_weights
+                                                
+                                                print(f"[Live WT] Normalized weights: Cz sum={np.sum(normalized_wcz):.2f}%, Cx sum={np.sum(normalized_wcx):.2f}%")
+                                                
+                                                # Compute correction factors for each comparable row
+                                                # Avoid division by zero
+                                                L_corrections = np.where(ref_L_comp != 0, (live_L_comp - ref_L_comp) / ref_L_comp, 0)
+                                                D_corrections = np.where(ref_D_comp != 0, (live_D_comp - ref_D_comp) / ref_D_comp, 0)
+                                                
+                                                # Apply weighted corrections to predict live coefficients
+                                                # Use normalized weights (sum to 100%)
+                                                weighted_L_correction = np.sum(L_corrections * normalized_wcz) / 100.0
+                                                weighted_D_correction = np.sum(D_corrections * normalized_wcx) / 100.0
+                                                
+                                                # Compute predicted values
+                                                predicted_cz = final_ref_cz * (1 + weighted_L_correction)
+                                                predicted_cx = final_ref_cx * (1 + weighted_D_correction)
+                                                
+                                                # Add predicted live point
+                                                fig.add_trace(go.Scatter(
+                                                    x=[predicted_cx],
+                                                    y=[-predicted_cz],  # Reverse sign for Cz
+                                                    mode='markers',
+                                                    name='Predicted Live',
+                                                    marker=dict(color='orange', size=12, symbol='star'),
+                                                    text=[f"Predicted: {live_folder}"],
+                                                    hovertemplate='<b>%{text}</b><br>Cx: %{x:.4f}<br>Cz: %{y:.4f}<extra></extra>'
+                                                ))
+                                                
+                                                # Update axis ranges
+                                                x_min = min(x_min, predicted_cx)
+                                                x_max = max(x_max, predicted_cx)
+                                                y_min = min(y_min, -predicted_cz)
+                                                y_max = max(y_max, -predicted_cz)
+                                                
+                                                print(f"[Live WT] ✓ Predicted live: Cx={predicted_cx:.4f}, Cz={predicted_cz:.4f}")
+                                                print(f"[Live WT] ✓ L correction: {weighted_L_correction:.4f}, D correction: {weighted_D_correction:.4f}")
+                                            else:
+                                                print(f"[Live WT] ✗ No comparable rows available")
+                                        else:
+                                            print(f"[Live WT] ✗ Live data missing or empty")
+                                    else:
+                                        print(f"[Live WT] ✗ Required columns not found in d1_processed")
+                                else:
+                                    print(f"[Live WT] ✗ Reference run not found in HDF5 or missing d1_processed")
+                            except Exception as e:
+                                print(f"[Live WT] Error computing predicted live performance: {e}")
+                                import traceback
+                                traceback.print_exc()
+            except Exception as e:
+                print(f"[Live WT] Error loading weighted values from HDF5: {e}")
+        
+        # Expand x/y limits by ±0.03
+        fig.update_layout(
+            xaxis_title="Cx",
+            yaxis_title="Cz",
+            xaxis_range=[x_min - 0.03, x_max + 0.03],
+            yaxis_range=[y_min - 0.03, y_max + 0.03],
+            legend=dict(x=1.02, y=1, xanchor='left', yanchor='top', orientation='v'),
+            margin=dict(r=120),
+            autosize=True,
+            height=None,
+            width=None,
+            uirevision=None  # Force complete refresh on every update
+        )
+        return fig, ""
+    except Exception as e:
+        return go.Figure(), f"Error reading wt.json: {e}"
+
+
+@callback(
     Output("live-wt-tabs-bottom", "children"),
     Input("live-wt-plot-refresh-interval", "n_intervals"),
     Input("live-wt-comparison-toggle", "value"),
@@ -320,10 +653,10 @@ def refresh_tabs(_plot_tick, toggle_values, homologation, ref_folder, live_folde
     # If toggle is off, clear all plots
     if not toggle_values or ("on" not in toggle_values):
         print(f"[Live WT] Toggle is OFF, clearing plots")
-        return [], []
+        return []
     if not homologation or not homologation.get("base_folder"):
         print(f"[Live WT] No homologation, clearing plots")
-        return [], []
+        return []
     base_folder = homologation["base_folder"]
     data_src = homologation.get("data_source_folder")
     live_data_dir = os.path.join(base_folder, "Live Data")
@@ -333,4 +666,4 @@ def refresh_tabs(_plot_tick, toggle_values, homologation, ref_folder, live_folde
     print(f"[Live WT] Building tabs | ref={ref_path} | live={live_path}")
     tabs = _build_tabs_content(ref_path, live_path, refresh_token=_plot_tick)
     print(f"[Live WT] Built {len(tabs)} tabs")
-    return tabs, tabs
+    return tabs

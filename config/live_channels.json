@@ -46,15 +46,15 @@
     "RRS RR Roller Bearing Temp"
   ],
   "Tyre Pressure": [
-    "CAN_79_TirePressLF",
-    "CAN_79_TirePressRF",
-    "CAN_79_TirePressLR",
-    "CAN_79_TirePressRR"
+    "CAN_15_pTPMSTyreFL",
+    "CAN_15_pTPMSTyreFR",
+    "CAN_15_pTPMSTyreRL",
+    "CAN_15_pTPMSTyreRR"
   ],
   "Upright Temperature": [
-    "CAN_79_UprightTempLF",
-    "CAN_79_UprightTempRF",
-    "CAN_79_UprightTempLR",
-    "CAN_79_UprightTempRR"
+    "CAN_15_TUprightFL",
+    "CAN_15_TUprightFR",
+    "CAN_15_TUprightRL",
+    "CAN_15_TUprightRR"
   ]
 }

@@ -18,8 +18,13 @@ LBF_TO_NEWTONS = 4.44822
 def _get_attr_str(arr):
     return [v.decode() if isinstance(v, (bytes, bytearray)) else v for v in arr]
 
-def compute_weighted_coeffs_from_d1_processed(run_grp, map_name=None):
+def compute_weighted_coeffs_from_d1_processed(run_grp, map_name=None, min_Cx_weighting=20):
     """Compute weighted_Cz and weighted_Cx based on d1_processed dataset and store as run attributes.
+
+    Args:
+        run_grp: HDF5 group containing the run data
+        map_name: Name of the map being used (for logging)
+        min_Cx_weighting: Minimum Cx weighting percentage (default 20, meaning 20% or 0.2)
 
     Given:
     - drag_tare = D value at setpoint == 'ZeroD1'
@@ -31,9 +36,8 @@ def compute_weighted_coeffs_from_d1_processed(run_grp, map_name=None):
     - min_CD = minimum CD from rows with valid (non-NaN) w_cx
     - CDW = CD * w_cx (only for valid measurements)
     
-    Weighted Cx calculation depends on map_name:
-    - For 'short' map: weighted_Cx = sum(CDW) / 100
-    - For other maps: weighted_Cx = sum(CDW) / 100 + 0.2 * min_CD
+    Weighted Cx calculation (all maps):
+    - weighted_Cx = sum(CDW) / 100 + (min_Cx_weighting / 100) * min_CD
     
     Note: Weight sums include ALL valid weights from the map, not just those with valid measurements.
     """
@@ -158,13 +162,9 @@ def compute_weighted_coeffs_from_d1_processed(run_grp, map_name=None):
         weighted_cz = float(clw_sum / wcz_sum) if (wcz_sum != 0.0 and not np.isnan(wcz_sum)) else 0.0
         weighted_cx_base = float(cdw_sum / 100.0)  # Normalize by 100 instead of wcx_sum
         
-        # Apply map-specific Cx calculation
-        if map_name == "short":
-            # For 'short' map: no 20% minimum offset
-            weighted_cx = weighted_cx_base
-        else:
-            # For 'homologation' and other maps: add 20% of minimum CD
-            weighted_cx = weighted_cx_base + 0.2 * min_cd
+        # Apply minimum CD offset using the min_Cx_weighting from the map (convert percentage to decimal)
+        min_cx_offset = (min_Cx_weighting / 100.0) * min_cd
+        weighted_cx = weighted_cx_base + min_cx_offset
         
         # Round to 3 decimal places (4th decimal will be zero)
         weighted_cz = round(weighted_cz, 3)
@@ -179,10 +179,7 @@ def compute_weighted_coeffs_from_d1_processed(run_grp, map_name=None):
         except Exception:
             run_name = str(run_grp)
         map_label = f" (map: {map_name})" if map_name else ""
-        if map_name == "short":
-            print(f"[WT] Run '{run_name}'{map_label}: weighted_Cz={weighted_cz:.6f}, weighted_Cx={weighted_cx:.6f} (base={weighted_cx_base:.6f}, no offset)")
-        else:
-            print(f"[WT] Run '{run_name}'{map_label}: weighted_Cz={weighted_cz:.6f}, weighted_Cx_base={weighted_cx_base:.6f}, min_CD_offset={0.2 * min_cd:.6f}, weighted_Cx={weighted_cx:.6f}")
+        print(f"[WT] Run '{run_name}'{map_label}: weighted_Cz={weighted_cz:.6f}, weighted_Cx_base={weighted_cx_base:.6f}, min_CD_offset={min_cx_offset:.6f} ({min_Cx_weighting}%), weighted_Cx={weighted_cx:.6f}")
         
         # Return success message with minimum CD info
         success_msg = f"Minimum CD: {min_cd:.6f} at ride height '{min_cd_setpoint}'"
@@ -191,21 +188,40 @@ def compute_weighted_coeffs_from_d1_processed(run_grp, map_name=None):
         return False, f"Error computing weighted coeffs: {e}"
 
 def load_setpoints_from_map(map_name):
-    """Load full setpoint data from the specified map in maps.json"""
+    """Load full setpoint data from the specified map in maps.json
+    
+    Returns:
+        tuple: (structured_data, columns, min_Cx_weighting)
+            - structured_data: list of rows with setpoint data
+            - columns: list of column names
+            - min_Cx_weighting: minimum Cx weighting percentage (default 20 if not specified)
+    """
     try:
         maps_config_path = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "config", "maps.json")
         )
         if not os.path.exists(maps_config_path):
-            return [], []
+            return [], [], 20
         
         with open(maps_config_path, "r") as f:
             maps_data = json.load(f)
         
         if map_name in maps_data:
-            setpoints_data = maps_data[map_name]
+            map_config = maps_data[map_name]
+            if not map_config:
+                return [], [], 20
+            
+            # Handle new structure with "setpoints" and "min_Cx_weighting" keys
+            if isinstance(map_config, dict) and "setpoints" in map_config:
+                setpoints_data = map_config["setpoints"]
+                min_Cx_weighting = map_config.get("min_Cx_weighting", 20)
+            else:
+                # Legacy structure: map_config is directly the setpoints array
+                setpoints_data = map_config
+                min_Cx_weighting = 20
+            
             if not setpoints_data:
-                return [], []
+                return [], [], min_Cx_weighting
             
             # Get column names from the first setpoint
             columns = list(setpoints_data[0].keys())
@@ -223,12 +239,12 @@ def load_setpoints_from_map(map_name):
                         row.append(str(value))
                 structured_data.append(row)
             
-            return structured_data, columns
+            return structured_data, columns, min_Cx_weighting
         else:
-            return [], []
+            return [], [], 20
     except Exception as e:
         print(f"Error loading setpoints from map {map_name}: {e}")
-        return [], []
+        return [], [], 20
 
 def _normalize_colname(name: str) -> str:
     return ''.join(ch.lower() for ch in name.strip())
@@ -267,7 +283,7 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
     """Create d1_processed data by combining map setpoints with d1 data columns"""
     try:
         # Load setpoints from map
-        setpoints_data, map_columns = load_setpoints_from_map(map_name)
+        setpoints_data, map_columns, _ = load_setpoints_from_map(map_name)
         if not setpoints_data or not map_columns:
             return [], []
         
@@ -769,8 +785,8 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                     
                     # Create d1_processed dataset with setpoints from the selected map and d1 data
                     if selected_map:
-                        # Validate row counts before creation
-                        sp_data_for_count, _sp_cols = load_setpoints_from_map(selected_map)
+                        # Validate row counts before creation and get min_Cx_weighting
+                        sp_data_for_count, _sp_cols, min_Cx_weighting = load_setpoints_from_map(selected_map)
                         map_rows = len(sp_data_for_count) if sp_data_for_count else 0
                         d1_rows = int(d1.shape[0]) if hasattr(d1, 'shape') and len(d1.shape) > 0 else 0
                         if map_rows > 0 and d1_rows > 0 and map_rows != d1_rows:
@@ -788,7 +804,7 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                                 # Store column names as attributes
                                 d1_processed_ds.attrs["columns"] = np.array(combined_columns, dtype='S50')
                                 # Compute weighted coefficients and store on run
-                                ok, min_cd_msg = compute_weighted_coeffs_from_d1_processed(run_grp, map_name=selected_map)
+                                ok, min_cd_msg = compute_weighted_coeffs_from_d1_processed(run_grp, map_name=selected_map, min_Cx_weighting=min_Cx_weighting)
                                 if not ok:
                                     message = (message + f"; {min_cd_msg}") if message else min_cd_msg
                                 else:
@@ -1136,19 +1152,20 @@ def save_table_changes(table_data, homologation):
                                 # Attempt to load structured d1 via file path if possible is not trivial here; use raw arrays
 
                             # Validate row counts between selected map and d1
-                            sp_data_for_count, _sp_cols = load_setpoints_from_map(new_map)
+                            sp_data_for_count, _sp_cols, min_Cx_weighting_new = load_setpoints_from_map(new_map)
                             map_rows = len(sp_data_for_count) if sp_data_for_count else 0
                             d1_rows = int(d1_data.shape[0]) if hasattr(d1_data, 'shape') and len(d1_data.shape) > 0 else (len(d1_data) if isinstance(d1_data, (list, np.ndarray)) else 0)
                             if map_rows > 0 and d1_rows > 0 and map_rows != d1_rows:
                                 # Restore d1_processed with old map before returning error
                                 if old_map:
+                                    _, _, min_Cx_weighting_old = load_setpoints_from_map(old_map)
                                     combined_data, combined_columns = create_d1_processed_data(old_map, d1_data, d1_columns, d1_structured, d1_structured_cols)
                                     if combined_data and combined_columns:
                                         combined_array = np.array(combined_data, dtype='S50')
                                         d1_processed_ds = run_grp.create_dataset("d1_processed", data=combined_array)
                                         d1_processed_ds.attrs["description"] = f"Setpoints from map: {old_map} with d1 data columns"
                                         d1_processed_ds.attrs["columns"] = np.array(combined_columns, dtype='S50')
-                                        compute_weighted_coeffs_from_d1_processed(run_grp, map_name=old_map)
+                                        compute_weighted_coeffs_from_d1_processed(run_grp, map_name=old_map, min_Cx_weighting=min_Cx_weighting_old)
                                 return f"Error: map has {map_rows} rows but d1 has {d1_rows} rows. Map remains: {old_map}"
 
                             # Create combined data with map setpoints and d1 columns
@@ -1158,7 +1175,7 @@ def save_table_changes(table_data, homologation):
                                 d1_processed_ds = run_grp.create_dataset("d1_processed", data=combined_array)
                                 d1_processed_ds.attrs["description"] = f"Setpoints from map: {new_map} with d1 data columns"
                                 d1_processed_ds.attrs["columns"] = np.array(combined_columns, dtype='S50')
-                                ok, min_cd_msg = compute_weighted_coeffs_from_d1_processed(run_grp, map_name=new_map)
+                                ok, min_cd_msg = compute_weighted_coeffs_from_d1_processed(run_grp, map_name=new_map, min_Cx_weighting=min_Cx_weighting_new)
                                 if not ok:
                                     return min_cd_msg
                                 else:
