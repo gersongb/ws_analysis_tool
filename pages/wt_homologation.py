@@ -288,16 +288,16 @@ def update_wt_plot(homologation_data, runs_table_data):
                         runs_by_type[group_key] = []
                     runs_by_type[group_key].append({
                         "cx": final_cx,
-                        "cz": -final_cz,  # Reverse the sign of Cz
+                        "cz": final_cz,  # Keep original sign, y-axis will be inverted
                         "run": run_row.get("run", ""),
                         "is_ref": run_type == "homologation_ref"  # Track if it needs blanking window
                     })
                     
-                    # Update axis ranges (using reversed Cz with offset)
+                    # Update axis ranges
                     x_min = min(x_min, final_cx)
                     x_max = max(x_max, final_cx)
-                    y_min = min(y_min, -final_cz)
-                    y_max = max(y_max, -final_cz)
+                    y_min = min(y_min, final_cz)
+                    y_max = max(y_max, final_cz)
                 except (ValueError, TypeError):
                     continue
             
@@ -378,7 +378,7 @@ def update_wt_plot(homologation_data, runs_table_data):
             xaxis_title="Cx",
             yaxis_title="Cz",
             xaxis_range=[x_min - 0.03, x_max + 0.03],
-            yaxis_range=[y_min - 0.03, y_max + 0.03],
+            yaxis_range=[y_max + 0.03, y_min - 0.03],  # Reversed order to invert y-axis
             legend=dict(x=1.02, y=1, xanchor='left', yanchor='top', orientation='v'),
             margin=dict(r=120),
             autosize=True,

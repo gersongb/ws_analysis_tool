@@ -1,5 +1,6 @@
 import dash
 from dash import html, dcc, callback, Input, Output, State
+from dash.dependencies import MATCH
 import dash_bootstrap_components as dbc
 import os
 import shutil
@@ -21,7 +22,7 @@ layout = dbc.Container([
     # Interval to run live copying (disabled until toggle on)
     dcc.Interval(id="live-wt-copy-interval", interval=20000, n_intervals=0, disabled=True),
     # Interval to refresh plots (always on) every 10s
-    dcc.Interval(id="live-wt-plot-refresh-interval", interval=10000, n_intervals=0),
+    dcc.Interval(id="live-wt-plot-refresh-interval", interval=10000, n_intervals=0, disabled=False, max_intervals=-1),
 
     # Main inner container
     dbc.Container([
@@ -63,6 +64,8 @@ layout = dbc.Container([
 
         # Status/debug message
         html.Div(id="live-wt-status", style={"marginBottom": "10px", "fontSize": "0.9rem", "color": "#666"}),
+        # Heartbeat to confirm interval ticks (debug)
+        html.Div(id="live-wt-heartbeat", style={"marginBottom": "10px", "fontSize": "0.85rem", "color": "#888"}),
 
         # Performance Window (at top)
         dbc.Container([
@@ -310,21 +313,114 @@ def _build_tabs_content(ref_path, live_path, refresh_token=None):
             if live_y is not None:
                 xl = x_live if isinstance(x_live, np.ndarray) and x_live.shape[0] == len(live_y) else np.arange(len(live_y))
                 fig.add_trace(go.Scatter(x=xl, y=live_y, mode="lines", name="Live"))
+            # Small per-tick margin toggle to force a minimal layout change
+            try:
+                r_margin = 20 if (isinstance(refresh_token, int) and (refresh_token % 2 == 0)) else 21
+            except Exception:
+                r_margin = 20
             fig.update_layout(
                 title=ch,
                 xaxis_title="Point Number",
-                margin=dict(l=40, r=20, t=40, b=30),
+                margin=dict(l=40, r=r_margin, t=40, b=30),
                 height=250,
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
-            # Force client re-render without affecting visuals
+            # Force client re-render without affecting visuals (no dummy trace to keep indices stable for extendData)
             if refresh_token is not None:
-                fig.update_layout(datarevision=str(refresh_token))
-            # Use unique id to force complete graph replacement on each refresh
-            graph_id = f"live-graph-{group_name}-{ch}-{refresh_token}" if refresh_token is not None else f"live-graph-{group_name}-{ch}"
-            graphs.append(dcc.Graph(id=graph_id, figure=fig, style={"marginBottom": "10px"}))
+                invisible_anno = dict(
+                    text=str(refresh_token),
+                    xref="paper", yref="paper", x=1.05, y=-0.15,
+                    showarrow=False,
+                    font=dict(size=1, color="rgba(0,0,0,0)"),
+                    opacity=0
+                )
+                fig.update_layout(
+                    datarevision=str(refresh_token),
+                    meta={"tick": str(refresh_token)},
+                    annotations=[invisible_anno]
+                )
+            # Use pattern-matching ID to support extendData updates per graph
+            graph_id = {"type": "live-graph", "group": group_name, "channel": ch}
+            graphs.append(dcc.Graph(id=graph_id, figure=fig, config={"responsive": True}, style={"marginBottom": "10px"}))
         tabs.append(dcc.Tab(label=group_name, children=graphs))
     return tabs
+
+
+# ExtendData callback for bottom graphs: append the latest live point for each channel
+@callback(
+    Output({"type": "live-graph", "group": MATCH, "channel": MATCH}, "extendData"),
+    Input("live-wt-plot-refresh-interval", "n_intervals"),
+    State("current-homologation-store", "data"),
+    State("live-wt-live-dropdown", "value"),
+    State({"type": "live-graph", "group": MATCH, "channel": MATCH}, "id"),
+    State({"type": "live-graph", "group": MATCH, "channel": MATCH}, "figure"),
+    prevent_initial_call=True
+)
+def _extend_live_graphs(_tick, homologation, live_folder, graph_id, fig_state):
+    try:
+        if not homologation or not live_folder:
+            return dash.no_update
+        data_src = homologation.get("data_source_folder")
+        if not data_src:
+            return dash.no_update
+        live_path = os.path.join(data_src, live_folder, "d1.asc")
+        series = _load_d1_series(live_path)
+        # Obtain the channel key from the graph ID (more reliable than title)
+        ch_name = None
+        try:
+            ch_name = graph_id.get("channel") if isinstance(graph_id, dict) else None
+        except Exception:
+            ch_name = None
+        if not ch_name or ch_name not in series:
+            return dash.no_update
+        y_arr = series.get(ch_name)
+        if y_arr is None or len(y_arr) == 0:
+            return dash.no_update
+        # X axis uses Point Number if available, else incremental index
+        x_arr = series.get("Point Number")
+
+        # Determine trace index for Live trace in this figure
+        trace_idx = -1
+        data_traces = fig_state.get("data", []) if isinstance(fig_state, dict) else []
+        for i, tr in enumerate(data_traces):
+            if isinstance(tr, dict) and tr.get("name") == "Live":
+                trace_idx = i
+                break
+        # If Live trace is not present in this figure yet, skip updating to avoid corrupting Reference
+        if trace_idx == -1:
+            return dash.no_update
+
+        # Current plotted length for the Live trace
+        current_len = 0
+        try:
+            current_x = data_traces[trace_idx].get("x", [])
+            # Support list or numpy array
+            if hasattr(current_x, "__len__"):
+                current_len = len(current_x)
+            else:
+                current_len = 0
+        except Exception:
+            current_len = 0
+
+        total_len = len(y_arr)
+        if current_len >= total_len:
+            return dash.no_update
+
+        # Append all new points since last length; cap batch to avoid huge updates
+        max_batch = 200
+        end_idx = min(total_len, current_len + max_batch)
+        new_y_seq = [float(v) for v in y_arr[current_len:end_idx]]
+        if isinstance(x_arr, np.ndarray) and x_arr.shape[0] == len(y_arr):
+            new_x_seq = [float(v) for v in x_arr[current_len:end_idx]]
+        else:
+            # Use sample index when no proper X is present
+            new_x_seq = list(range(current_len, end_idx))
+
+        extend = {"x": [new_x_seq], "y": [new_y_seq]}
+        max_points = 1000
+        return (extend, [trace_idx], max_points)
+    except Exception:
+        return dash.no_update
 
 
 @callback(
@@ -413,7 +509,7 @@ def update_live_homologation_plot(homologation_data, _plot_tick, toggle_values, 
                                 # Add reference point
                                 fig.add_trace(go.Scatter(
                                     x=[final_ref_cx],
-                                    y=[-final_ref_cz],  # Reverse sign for Cz
+                                    y=[final_ref_cz],  # Keep original sign, y-axis will be inverted
                                     mode='markers',
                                     name='Reference',
                                     marker=dict(color='blue', size=12, symbol='circle'),
@@ -424,8 +520,8 @@ def update_live_homologation_plot(homologation_data, _plot_tick, toggle_values, 
                                 # Update axis ranges
                                 x_min = min(x_min, final_ref_cx)
                                 x_max = max(x_max, final_ref_cx)
-                                y_min = min(y_min, -final_ref_cz)
-                                y_max = max(y_max, -final_ref_cz)
+                                y_min = min(y_min, final_ref_cz)
+                                y_max = max(y_max, final_ref_cz)
                         
                         # Get live run values
                         if live_folder:
@@ -438,7 +534,7 @@ def update_live_homologation_plot(homologation_data, _plot_tick, toggle_values, 
                                 # Add live point
                                 fig.add_trace(go.Scatter(
                                     x=[final_live_cx],
-                                    y=[-final_live_cz],  # Reverse sign for Cz
+                                    y=[final_live_cz],  # Keep original sign, y-axis will be inverted
                                     mode='markers',
                                     name='Live',
                                     marker=dict(color='red', size=12, symbol='diamond'),
@@ -449,8 +545,8 @@ def update_live_homologation_plot(homologation_data, _plot_tick, toggle_values, 
                                 # Update axis ranges
                                 x_min = min(x_min, final_live_cx)
                                 x_max = max(x_max, final_live_cx)
-                                y_min = min(y_min, -final_live_cz)
-                                y_max = max(y_max, -final_live_cz)
+                                y_min = min(y_min, final_live_cz)
+                                y_max = max(y_max, final_live_cz)
                         
                         # Compute predicted live performance based on L and D corrections
                         print(f"[Live WT] Checking prediction conditions: ref={ref_folder}, live={live_folder}, ref_wcx={ref_wcx}, ref_wcz={ref_wcz}, final_ref_cx={final_ref_cx}, final_ref_cz={final_ref_cz}")
@@ -589,7 +685,7 @@ def update_live_homologation_plot(homologation_data, _plot_tick, toggle_values, 
                                                 # Add predicted live point
                                                 fig.add_trace(go.Scatter(
                                                     x=[predicted_cx],
-                                                    y=[-predicted_cz],  # Reverse sign for Cz
+                                                    y=[predicted_cz],  # Keep original sign, y-axis will be inverted
                                                     mode='markers',
                                                     name='Predicted Live',
                                                     marker=dict(color='orange', size=12, symbol='star'),
@@ -600,8 +696,8 @@ def update_live_homologation_plot(homologation_data, _plot_tick, toggle_values, 
                                                 # Update axis ranges
                                                 x_min = min(x_min, predicted_cx)
                                                 x_max = max(x_max, predicted_cx)
-                                                y_min = min(y_min, -predicted_cz)
-                                                y_max = max(y_max, -predicted_cz)
+                                                y_min = min(y_min, predicted_cz)
+                                                y_max = max(y_max, predicted_cz)
                                                 
                                                 print(f"[Live WT] ✓ Predicted live: Cx={predicted_cx:.4f}, Cz={predicted_cz:.4f}")
                                                 print(f"[Live WT] ✓ L correction: {weighted_L_correction:.4f}, D correction: {weighted_D_correction:.4f}")
@@ -621,18 +717,37 @@ def update_live_homologation_plot(homologation_data, _plot_tick, toggle_values, 
                 print(f"[Live WT] Error loading weighted values from HDF5: {e}")
         
         # Expand x/y limits by ±0.03
+        # Small per-tick margin toggle to force a minimal layout change
+        try:
+            r_margin_top = 120 if (int(_plot_tick) % 2 == 0) else 119
+        except Exception:
+            r_margin_top = 120
         fig.update_layout(
             xaxis_title="Cx",
             yaxis_title="Cz",
             xaxis_range=[x_min - 0.03, x_max + 0.03],
-            yaxis_range=[y_min - 0.03, y_max + 0.03],
+            yaxis_range=[y_max + 0.03, y_min - 0.03],  # Reversed order to invert y-axis
             legend=dict(x=1.02, y=1, xanchor='left', yanchor='top', orientation='v'),
-            margin=dict(r=120),
+            margin=dict(r=r_margin_top),
             autosize=True,
             height=None,
             width=None,
-            uirevision=None  # Force complete refresh on every update
+            # Tie revisions to refresh tick to force client update on each interval
+            datarevision=str(_plot_tick),
+            meta={"tick": str(_plot_tick)},
+            # Add invisible per-tick annotation to guarantee a real layout change
+            annotations=[dict(
+                text=str(_plot_tick),
+                xref="paper", yref="paper", x=1.05, y=-0.15,
+                showarrow=False,
+                font=dict(size=1, color="rgba(0,0,0,0)"),
+                opacity=0
+            )]
         )
+        # Add an invisible per-tick dummy trace so data array changes
+        fig.add_trace(go.Scatter(x=[0], y=[0], mode="markers", name=f"_tick_{_plot_tick}",
+                                 marker=dict(opacity=0), line=dict(color="rgba(0,0,0,0)"),
+                                 showlegend=False, hoverinfo="skip"))
         return fig, ""
     except Exception as e:
         return go.Figure(), f"Error reading wt.json: {e}"
@@ -640,16 +755,15 @@ def update_live_homologation_plot(homologation_data, _plot_tick, toggle_values, 
 
 @callback(
     Output("live-wt-tabs-bottom", "children"),
-    Input("live-wt-plot-refresh-interval", "n_intervals"),
     Input("live-wt-comparison-toggle", "value"),
     State("current-homologation-store", "data"),
     State("live-wt-reference-dropdown", "value"),
     State("live-wt-live-dropdown", "value"),
     prevent_initial_call=False
 )
-def refresh_tabs(_plot_tick, toggle_values, homologation, ref_folder, live_folder):
+def refresh_tabs(toggle_values, homologation, ref_folder, live_folder):
     import time
-    print(f"[Live WT] refresh_tabs called at {time.strftime('%H:%M:%S')} | tick={_plot_tick} | toggle={toggle_values}")
+    print(f"[Live WT] refresh_tabs called at {time.strftime('%H:%M:%S')} | toggle={toggle_values}")
     # If toggle is off, clear all plots
     if not toggle_values or ("on" not in toggle_values):
         print(f"[Live WT] Toggle is OFF, clearing plots")
@@ -664,6 +778,21 @@ def refresh_tabs(_plot_tick, toggle_values, homologation, ref_folder, live_folde
     # Always re-read Live directly from source folder
     live_path = os.path.join(data_src, live_folder, "d1.asc") if (data_src and live_folder) else None
     print(f"[Live WT] Building tabs | ref={ref_path} | live={live_path}")
-    tabs = _build_tabs_content(ref_path, live_path, refresh_token=_plot_tick)
+    tabs = _build_tabs_content(ref_path, live_path)
     print(f"[Live WT] Built {len(tabs)} tabs")
     return tabs
+
+
+# Heartbeat: show ticks to confirm intervals are firing and reaching client
+@callback(
+    Output("live-wt-heartbeat", "children"),
+    Input("live-wt-plot-refresh-interval", "n_intervals"),
+    prevent_initial_call=False
+)
+def _live_wt_heartbeat(n):
+    try:
+        from datetime import datetime
+        ts = datetime.now().strftime("%H:%M:%S")
+        return f"Heartbeat tick: {n} at {ts}"
+    except Exception:
+        return f"Heartbeat tick: {n}"

@@ -747,7 +747,12 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                     data = np.genfromtxt(io.StringIO(''.join(data_lines)), delimiter='\t')
                     return data, colnames
                 d1, d1_colnames = load_d1_with_colnames(d1_path)
-                d2, d2_colnames = load_d1_with_colnames(d2_path)
+                # Load d2 only if it exists
+                d2_exists = os.path.exists(d2_path)
+                if d2_exists:
+                    d2, d2_colnames = load_d1_with_colnames(d2_path)
+                else:
+                    d2, d2_colnames = None, None
                 # Also load a structured version of d1 to enable per-setpoint alignment when possible
                 d1_structured, d1_structured_cols = load_d1_structured(d1_path)
                 with h5py.File(h5_path, "a") as h5f:
@@ -764,10 +769,12 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                     d1_ds.attrs["PSF_to_Pa"] = PSF_TO_PA
                     d1_ds.attrs["LBF_to_Newtons"] = LBF_TO_NEWTONS
 
-                    d2_ds = run_grp.create_dataset("d2", data=d2)
-                    d2_ds.attrs["columns"] = np.array(d2_colnames, dtype='S')
-                    d2_ds.attrs["PSF_to_Pa"] = PSF_TO_PA
-                    d2_ds.attrs["LBF_to_Newtons"] = LBF_TO_NEWTONS
+                    # Only create d2 dataset if d2 file exists
+                    if d2_exists and d2 is not None:
+                        d2_ds = run_grp.create_dataset("d2", data=d2)
+                        d2_ds.attrs["columns"] = np.array(d2_colnames, dtype='S')
+                        d2_ds.attrs["PSF_to_Pa"] = PSF_TO_PA
+                        d2_ds.attrs["LBF_to_Newtons"] = LBF_TO_NEWTONS
                     run_grp.attrs["description"] = "no description available"
                     # Don't initialize weighted values to 0.0 - they will be computed from d1_processed
                     # run_grp.attrs["weighted_Cz"] = 0.0
@@ -832,7 +839,10 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                         d1_processed_ds.attrs["description"] = "No map selected"
                         d1_processed_ds.attrs["columns"] = np.array([], dtype='S50')
 
-                message = f"Imported {folder_name} successfully."
+                if d2_exists:
+                    message = f"Imported {folder_name} successfully."
+                else:
+                    message = f"Imported {folder_name} successfully (d2.asc not found, skipped)."
             except Exception as e:
                 message = f"Error: {e}"
         # Always reload the run list after import

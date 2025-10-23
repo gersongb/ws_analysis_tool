@@ -107,14 +107,14 @@
       {"setpoint": "PreZero", "road_speed": 2, "wind_speed": 0, "frh": 50, "rrh": 80, "roll": 0, "yaw": 0, "w_cx": null, "w_cz": null},
       {"setpoint": "PreZeroD", "road_speed": 60, "wind_speed": 0, "frh": 50, "rrh": 80, "roll": 0, "yaw": 0, "w_cx": null, "w_cz": null},
       {"setpoint": "First", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 0, "yaw": 0, "w_cx": null, "w_cz": null},
-      {"setpoint": "S01", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 1.2, "yaw": 0, "w_cx": null, "w_cz": null},
-      {"setpoint": "S02", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 1.2, "yaw": -5, "w_cx": null, "w_cz": null},
+      {"setpoint": "S01", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 1.2, "yaw": 0, "w_cx": 0.0, "w_cz": 0.0},
+      {"setpoint": "S02", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 1.2, "yaw": -5, "w_cx": 0.0, "w_cz": 0.0},
       {"setpoint": "S03", "road_speed": 60, "wind_speed": 60, "frh": 45, "rrh": 65, "roll": 1, "yaw": -5, "w_cx": 0.758, "w_cz": 9.672},
       {"setpoint": "S04", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 1.2, "yaw": -5, "w_cx": 0.152, "w_cz": 9.672},
-      {"setpoint": "S05", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 1.2, "yaw": -3, "w_cx": null, "w_cz": null},
+      {"setpoint": "S05", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 1.2, "yaw": -3, "w_cx": 0.0, "w_cz": 0.0},
       {"setpoint": "S06", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 65, "roll": 1.2, "yaw": -3, "w_cx": 8.485, "w_cz": 10.363},
       {"setpoint": "S07", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 1.2, "yaw": -3, "w_cx": 0.455, "w_cz": 8.117},
-      {"setpoint": "S08", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 1.2, "yaw": 0, "w_cx": null, "w_cz": null},
+      {"setpoint": "S08", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 1.2, "yaw": 0, "w_cx": 0.0, "w_cz": 0.0},
       {"setpoint": "S09", "road_speed": 60, "wind_speed": 60, "frh": 45, "rrh": 70, "roll": 0, "yaw": 0, "w_cx": 3.333, "w_cz": 18.135},
       {"setpoint": "S10", "road_speed": 60, "wind_speed": 60, "frh": 35, "rrh": 65, "roll": 0, "yaw": 0, "w_cx": 1.364, "w_cz": 10.708},
       {"setpoint": "S11", "road_speed": 60, "wind_speed": 60, "frh": 55, "rrh": 65, "roll": 0, "yaw": 0, "w_cx": 10.152, "w_cz": 10.190},
@@ -122,7 +122,7 @@
       {"setpoint": "S13", "road_speed": 60, "wind_speed": 60, "frh": 35, "rrh": 40, "roll": 0, "yaw": 0, "w_cx": 15.758, "w_cz": 2.763},
       {"setpoint": "S14", "road_speed": 60, "wind_speed": 60, "frh": 30, "rrh": 30, "roll": 0, "yaw": 0, "w_cx": 2.273, "w_cz": 0.173},
       {"setpoint": "Last", "road_speed": 60, "wind_speed": 60, "frh": 50, "rrh": 80, "roll": 0, "yaw": 0, "w_cx": 0.758, "w_cz": 12.090},
-      {"setpoint": "ZeroD", "road_speed": 60, "wind_speed": 0, "frh": 50, "rrh": 80, "roll": 0, "yaw": 0, "w_cx": null, "w_cz": null},
+      {"setpoint": "ZeroD1", "road_speed": 60, "wind_speed": 0, "frh": 50, "rrh": 80, "roll": 0, "yaw": 0, "w_cx": null, "w_cz": null},
       {"setpoint": "ZeroL", "road_speed": 2, "wind_speed": 0, "frh": 50, "rrh": 80, "roll": 0, "yaw": 0, "w_cx": null, "w_cz": null}
     ]
   }

@@ -212,10 +212,16 @@ def unified_homologation_callback(
                         with open(MAPS_FILE, "r") as mf:
                             maps_payload = json.load(mf)
                         # Write each top-level map into its own JSON file
+                        created_maps = []
                         for map_name, map_content in maps_payload.items():
                             out_path = os.path.join(wt_maps_path, f"{map_name}.json")
                             with open(out_path, "w") as out_f:
                                 json.dump(map_content, out_f, indent=2)
+                            created_maps.append(map_name)
+                        print(f"[Setup] Created map files for homologation: {', '.join(created_maps)}")
+                        # Verify short_team is included
+                        if "short_team" not in created_maps:
+                            print(f"[Setup] WARNING: short_team map not found in maps.json")
                     else:
                         # If maps.json is missing, create an empty placeholder to avoid breaking downstream flows
                         placeholder_path = os.path.join(wt_maps_path, "README.txt")
