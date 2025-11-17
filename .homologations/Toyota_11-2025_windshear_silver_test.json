@@ -1,0 +1,14 @@
+{
+  "manufacturer": "Toyota",
+  "homologation_date": "2025-11-17",
+  "session_name": "Toyota_11-2025_windshear_silver_test",
+  "name_identifier": "silver_test",
+  "base_folder": "C:\\Users\\g.garsed\\Documents\\wt_homologation",
+  "reference_folder": "C:\\Users\\g.garsed\\Documents\\wt_homologation\\Toyota_11-2025_windshear_silver_test",
+  "wt_maps": "C:\\Users\\g.garsed\\Documents\\wt_homologation\\Toyota_11-2025_windshear_silver_test\\wt_maps",
+  "data": "C:\\Users\\g.garsed\\Documents\\wt_homologation\\Toyota_11-2025_windshear_silver_test\\data",
+  "raw": "C:\\Users\\g.garsed\\Documents\\wt_homologation\\Toyota_11-2025_windshear_silver_test\\data\\raw",
+  "data_source_folder": "C:\\Users\\g.garsed\\Documents\\wt_homologation\\source",
+  "wind_tunnel": "windshear",
+  "h5_path": "C:\\Users\\g.garsed\\Documents\\wt_homologation\\Toyota_11-2025_windshear_silver_test\\data\\Toyota_11-2025_windshear_silver_test.h5"
+}
