@@ -18,17 +18,19 @@ LBF_TO_NEWTONS = 4.44822
 def _get_attr_str(arr):
     return [v.decode() if isinstance(v, (bytes, bytearray)) else v for v in arr]
 
-def compute_weighted_coeffs_from_d1_processed(run_grp, map_name=None, min_Cx_weighting=20):
+def compute_weighted_coeffs_from_d1_processed(run_grp, map_name=None, min_Cx_weighting=20, instability=False, speed_correction=None):
     """Compute weighted_Cz and weighted_Cx based on d1_processed dataset and store as run attributes.
 
     Args:
         run_grp: HDF5 group containing the run data
         map_name: Name of the map being used (for logging)
         min_Cx_weighting: Minimum Cx weighting percentage (default 20, meaning 20% or 0.2)
+        instability: Boolean flag to enable speed-matched tares (default False)
+        speed_correction: Dict with speed correction config (None if not specified)
 
     Given:
-    - drag_tare = D value at setpoint == 'ZeroD1'
-    - lift_tare = L value at setpoint == 'ZeroL'
+    - drag_tare = D value at appropriate Zero setpoint (speed-matched if instability=True)
+    - lift_tare = L value at appropriate Zero setpoint (speed-matched if instability=True)
     - CL = (L - lift_tare) * LBF_TO_NEWTONS / (DYNPR * PSF_TO_PA)
     - CLW = CL * w_cz (only for valid measurements)
       weighted_Cz = sum(CLW) / sum(ALL w_cz from map)
@@ -59,6 +61,8 @@ def compute_weighted_coeffs_from_d1_processed(run_grp, map_name=None, min_Cx_wei
         DYNPR_idx = _find_col_index('DYNPR', cols)
         wcz_idx = _find_col_index('w_cz', cols)
         wcx_idx = _find_col_index('w_cx', cols)
+        road_speed_idx = _find_col_index('road_speed', cols)
+        wind_speed_idx = _find_col_index('wind_speed', cols)
 
         for required_name, idx in [("setpoint", sp_idx), ("L", L_idx), ("DYNPR", DYNPR_idx), ("w_cz", wcz_idx)]:
             if idx == -1:
@@ -74,44 +78,166 @@ def compute_weighted_coeffs_from_d1_processed(run_grp, map_name=None, min_Cx_wei
             except Exception:
                 return float('nan')
 
-        # Find tares
-        drag_tare = float('nan')
-        lift_tare = float('nan')
+        # Find tares - support instability mode with speed-matched zeros
+        # Build tare dictionaries: by speed and by name
+        tare_values = {}  # {speed: {'D': value, 'L': value}}
+        tare_by_name = {}  # {setpoint_name: {'D': value, 'L': value}}
         for r in range(data.shape[0]):
             sp_val = data[r, sp_idx]
             if isinstance(sp_val, (bytes, bytearray)):
                 sp_val = sp_val.decode()
-            if str(sp_val) == 'ZeroD1' and D_idx != -1:
-                drag_tare = to_float(data[r, D_idx])
-            if str(sp_val) == 'ZeroL':
-                lift_tare = to_float(data[r, L_idx])
-        # First pass: find minimum CD from rows with valid w_cx
+            sp_name = str(sp_val)
+            if 'Zero' in sp_name:
+                speed = to_float(data[r, road_speed_idx]) if road_speed_idx != -1 else 60.0
+                if speed not in tare_values:
+                    tare_values[speed] = {}
+                if sp_name not in tare_by_name:
+                    tare_by_name[sp_name] = {}
+                if D_idx != -1:
+                    tare_values[speed]['D'] = to_float(data[r, D_idx])
+                    tare_by_name[sp_name]['D'] = to_float(data[r, D_idx])
+                if L_idx != -1:
+                    tare_values[speed]['L'] = to_float(data[r, L_idx])
+                    tare_by_name[sp_name]['L'] = to_float(data[r, L_idx])
+        
+        # Helper function to get appropriate tare value based on speed
+        def get_tare_for_speed(speed, tare_type):
+            # Lift tare ALWAYS uses ZeroL (2 mph), regardless of instability mode
+            if tare_type == 'L':
+                return tare_by_name.get('ZeroL', {}).get('L', 0.0)
+            
+            # Drag tare handling
+            if not instability:
+                # Non-instability mode: use ZeroD1 specifically by name
+                return tare_by_name.get('ZeroD1', {}).get('D', 0.0)
+            else:
+                # Instability mode: match speed for drag (50 mph -> ZeroD2, 60 mph -> ZeroD1)
+                if speed in tare_values and 'D' in tare_values[speed]:
+                    return tare_values[speed]['D']
+                # Fallback to closest speed
+                speeds = sorted([s for s in tare_values.keys() if 'D' in tare_values[s]])
+                if not speeds:
+                    return 0.0
+                closest_speed = min(speeds, key=lambda s: abs(s - speed))
+                return tare_values[closest_speed].get('D', 0.0)
+        
+        if instability:
+            print(f"[WT] Instability mode enabled for compute. Found tare values at speeds: {sorted(tare_values.keys())}")
+        
+        # Calculate speed correction deltas if configured
+        delta_CL = 0.0
+        delta_CD = 0.0
+        unstable_50_name = None
+        if speed_correction and instability:
+            ref_60_name = speed_correction.get('reference_60')
+            ref_50_name = speed_correction.get('reference_50')
+            unstable_50_name = speed_correction.get('unstable_50')
+            
+            if ref_60_name and ref_50_name and unstable_50_name:
+                # Find the data for reference setpoints
+                ref_60_L, ref_60_D, ref_60_dynpr, ref_60_speed = None, None, None, None
+                ref_50_L, ref_50_D, ref_50_dynpr, ref_50_speed = None, None, None, None
+                
+                for r in range(data.shape[0]):
+                    sp_val = data[r, sp_idx]
+                    if isinstance(sp_val, (bytes, bytearray)):
+                        sp_val = sp_val.decode()
+                    sp_name_check = str(sp_val)
+                    
+                    if sp_name_check == ref_60_name:
+                        ref_60_L = to_float(data[r, L_idx])
+                        ref_60_D = to_float(data[r, D_idx]) if D_idx != -1 else float('nan')
+                        ref_60_dynpr = to_float(data[r, DYNPR_idx])
+                        ref_60_speed = to_float(data[r, road_speed_idx]) if road_speed_idx != -1 else 60.0
+                    elif sp_name_check == ref_50_name:
+                        ref_50_L = to_float(data[r, L_idx])
+                        ref_50_D = to_float(data[r, D_idx]) if D_idx != -1 else float('nan')
+                        ref_50_dynpr = to_float(data[r, DYNPR_idx])
+                        ref_50_speed = to_float(data[r, road_speed_idx]) if road_speed_idx != -1 else 50.0
+                
+                # Calculate deltas if both reference points found
+                if all(v is not None for v in [ref_60_L, ref_60_D, ref_60_dynpr, ref_60_speed, ref_50_L, ref_50_D, ref_50_dynpr, ref_50_speed]):
+                    # Calculate CL and CD for reference at 60 mph
+                    lift_tare_60 = get_tare_for_speed(ref_60_speed, 'L')
+                    drag_tare_60 = get_tare_for_speed(ref_60_speed, 'D')
+                    
+                    CL_60 = 0.0
+                    CD_60 = 0.0
+                    if not (np.isnan(ref_60_L) or np.isnan(lift_tare_60) or np.isnan(ref_60_dynpr) or ref_60_dynpr == 0):
+                        CL_60 = (ref_60_L - lift_tare_60) * LBF_TO_NEWTONS / (ref_60_dynpr * PSF_TO_PA)
+                    if not (np.isnan(ref_60_D) or np.isnan(drag_tare_60) or np.isnan(ref_60_dynpr) or ref_60_dynpr == 0):
+                        CD_60 = (ref_60_D - drag_tare_60) * LBF_TO_NEWTONS / (ref_60_dynpr * PSF_TO_PA)
+                    
+                    # Calculate CL and CD for reference at 50 mph
+                    lift_tare_50 = get_tare_for_speed(ref_50_speed, 'L')
+                    drag_tare_50 = get_tare_for_speed(ref_50_speed, 'D')
+                    
+                    CL_50 = 0.0
+                    CD_50 = 0.0
+                    if not (np.isnan(ref_50_L) or np.isnan(lift_tare_50) or np.isnan(ref_50_dynpr) or ref_50_dynpr == 0):
+                        CL_50 = (ref_50_L - lift_tare_50) * LBF_TO_NEWTONS / (ref_50_dynpr * PSF_TO_PA)
+                    if not (np.isnan(ref_50_D) or np.isnan(drag_tare_50) or np.isnan(ref_50_dynpr) or ref_50_dynpr == 0):
+                        CD_50 = (ref_50_D - drag_tare_50) * LBF_TO_NEWTONS / (ref_50_dynpr * PSF_TO_PA)
+                    
+                    # Calculate deltas
+                    delta_CL = CL_60 - CL_50
+                    delta_CD = CD_60 - CD_50
+                    
+                    print(f"[WT] Speed correction (compute): {ref_60_name}@60mph CL={CL_60:.6f} CD={CD_60:.6f}, {ref_50_name}@50mph CL={CL_50:.6f} CD={CD_50:.6f}")
+                    print(f"[WT] Speed correction deltas (compute): delta_CL={delta_CL:.6f}, delta_CD={delta_CD:.6f}")
+                    print(f"[WT] Will apply correction to unstable setpoint: {unstable_50_name}")
+        
+        # First pass: find minimum CD from rows with valid w_cx (post speed-correction)
         min_cd = float('inf')
         min_cd_setpoint = "Unknown"
         valid_cd_values = []
         for r in range(data.shape[0]):
+            # Get setpoint name
+            sp_val = data[r, sp_idx]
+            if isinstance(sp_val, (bytes, bytearray)):
+                sp_val = sp_val.decode()
+            sp_name_str = str(sp_val)
+            
+            # Exclude reference setpoints from min_CD calculation if speed_correction is configured
+            if speed_correction and instability:
+                ref_60_name = speed_correction.get('reference_60')
+                ref_50_name = speed_correction.get('reference_50')
+                if sp_name_str in [ref_60_name, ref_50_name]:
+                    continue  # Skip reference setpoints
+            
             D = to_float(data[r, D_idx]) if D_idx != -1 else float('nan')
             dynpr = to_float(data[r, DYNPR_idx])
             wcx = to_float(data[r, wcx_idx]) if wcx_idx != -1 else float('nan')
+            road_speed = to_float(data[r, road_speed_idx]) if road_speed_idx != -1 else 60.0
+            wind_speed = to_float(data[r, wind_speed_idx]) if wind_speed_idx != -1 else 60.0
+            
+            # Skip rows with wind_speed=0 (Zero/tare setpoints)
+            if wind_speed == 0:
+                continue
+            
+            # Get appropriate drag tare for this speed
+            drag_tare = get_tare_for_speed(road_speed, 'D')
             
             if not (np.isnan(D) or np.isnan(drag_tare) or np.isnan(dynpr) or np.isnan(wcx) or dynpr == 0):
                 cd = (D - drag_tare) * LBF_TO_NEWTONS / (dynpr * PSF_TO_PA)
+                
+                # Apply speed correction if this is the unstable setpoint
+                if speed_correction and instability and unstable_50_name and sp_name_str == unstable_50_name:
+                    if not np.isnan(cd):
+                        cd = cd + delta_CD
+                
                 if not np.isnan(cd):
                     valid_cd_values.append(cd)
                     if cd < min_cd:
                         min_cd = cd
-                        # Get setpoint name for this row
-                        sp_val = data[r, sp_idx]
-                        if isinstance(sp_val, (bytes, bytearray)):
-                            sp_val = sp_val.decode()
-                        min_cd_setpoint = str(sp_val)
+                        min_cd_setpoint = sp_name_str
         
         # Handle case where no valid CD values found
         if min_cd == float('inf'):
             min_cd = 0.0
             min_cd_setpoint = "None"
         
-        print(f"[WT] Minimum CD found (from rows with valid w_cx): {min_cd:.6f} at setpoint '{min_cd_setpoint}'")
+        print(f"[WT] Minimum CD found (valid w_cx, wind_speed>0, post-correction, excl. references): {min_cd:.6f} at setpoint '{min_cd_setpoint}'")
         
         # Second pass: compute CL, CD, CLW and CDW, accumulate sums and sum of weights
         clw_sum = 0.0
@@ -124,6 +250,11 @@ def compute_weighted_coeffs_from_d1_processed(run_grp, map_name=None, min_Cx_wei
             dynpr = to_float(data[r, DYNPR_idx])
             wcz = to_float(data[r, wcz_idx])
             wcx = to_float(data[r, wcx_idx]) if wcx_idx != -1 else float('nan')
+            road_speed = to_float(data[r, road_speed_idx]) if road_speed_idx != -1 else 60.0
+            
+            # Get appropriate tares for this speed
+            lift_tare = get_tare_for_speed(road_speed, 'L')
+            drag_tare = get_tare_for_speed(road_speed, 'D')
             
             # Accumulate weight sums for ALL valid weights (not just when measurements are valid)
             if not np.isnan(wcz):
@@ -140,16 +271,33 @@ def compute_weighted_coeffs_from_d1_processed(run_grp, map_name=None, min_Cx_wei
             # Calculate CL (Coefficient of Lift) first
             if not (np.isnan(L) or np.isnan(lift_tare) or np.isnan(dynpr) or dynpr == 0):
                 cl = (L - lift_tare) * LBF_TO_NEWTONS / (dynpr * PSF_TO_PA)
-                if not np.isnan(cl) and not np.isnan(wcz):
-                    clw = cl * wcz  # CLW = CL * w_cz
-                    clw_sum += clw
             
             # Calculate CD (Coefficient of Drag) first
             if not (np.isnan(D) or np.isnan(drag_tare) or np.isnan(dynpr) or dynpr == 0):
                 cd = (D - drag_tare) * LBF_TO_NEWTONS / (dynpr * PSF_TO_PA)
-                if not np.isnan(cd) and not np.isnan(wcx):
-                    cdw = cd * wcx  # CDW = CD * w_cx (back to original formula)
-                    cdw_sum += cdw
+            
+            # Apply speed correction if this is the unstable setpoint
+            if speed_correction and instability and unstable_50_name:
+                sp_val = data[r, sp_idx]
+                if isinstance(sp_val, (bytes, bytearray)):
+                    sp_val = sp_val.decode()
+                if str(sp_val) == unstable_50_name:
+                    cl_before = cl
+                    cd_before = cd
+                    if not np.isnan(cl):
+                        cl = cl + delta_CL
+                    if not np.isnan(cd):
+                        cd = cd + delta_CD
+                    print(f"[WT] Applied speed correction to {unstable_50_name}: CL {cl_before:.6f} -> {cl:.6f}, CD {cd_before:.6f} -> {cd:.6f}")
+            
+            # Calculate weighted values
+            if not np.isnan(cl) and not np.isnan(wcz):
+                clw = cl * wcz  # CLW = CL * w_cz
+                clw_sum += clw
+            
+            if not np.isnan(cd) and not np.isnan(wcx):
+                cdw = cd * wcx  # CDW = CD * w_cx (back to original formula)
+                cdw_sum += cdw
 
             # Per-row debug for short map
             if map_name == "short":
@@ -191,17 +339,19 @@ def load_setpoints_from_map(map_name):
     """Load full setpoint data from the specified map in maps.json
     
     Returns:
-        tuple: (structured_data, columns, min_Cx_weighting)
+        tuple: (structured_data, columns, min_Cx_weighting, instability, speed_correction)
             - structured_data: list of rows with setpoint data
             - columns: list of column names
             - min_Cx_weighting: minimum Cx weighting percentage (default 20 if not specified)
+            - instability: boolean flag indicating if map has instability (default False)
+            - speed_correction: dict with speed correction config (None if not specified)
     """
     try:
         maps_config_path = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "config", "maps.json")
         )
         if not os.path.exists(maps_config_path):
-            return [], [], 20
+            return [], [], 20, False, None
         
         with open(maps_config_path, "r") as f:
             maps_data = json.load(f)
@@ -209,19 +359,23 @@ def load_setpoints_from_map(map_name):
         if map_name in maps_data:
             map_config = maps_data[map_name]
             if not map_config:
-                return [], [], 20
+                return [], [], 20, False, None
             
             # Handle new structure with "setpoints" and "min_Cx_weighting" keys
             if isinstance(map_config, dict) and "setpoints" in map_config:
                 setpoints_data = map_config["setpoints"]
                 min_Cx_weighting = map_config.get("min_Cx_weighting", 20)
+                instability = map_config.get("instability", False)
+                speed_correction = map_config.get("speed_correction", None)
             else:
                 # Legacy structure: map_config is directly the setpoints array
                 setpoints_data = map_config
                 min_Cx_weighting = 20
+                instability = False
+                speed_correction = None
             
             if not setpoints_data:
-                return [], [], min_Cx_weighting
+                return [], [], min_Cx_weighting, instability, speed_correction
             
             # Get column names from the first setpoint
             columns = list(setpoints_data[0].keys())
@@ -239,12 +393,12 @@ def load_setpoints_from_map(map_name):
                         row.append(str(value))
                 structured_data.append(row)
             
-            return structured_data, columns, min_Cx_weighting
+            return structured_data, columns, min_Cx_weighting, instability, speed_correction
         else:
-            return [], [], 20
+            return [], [], 20, False, None
     except Exception as e:
         print(f"Error loading setpoints from map {map_name}: {e}")
-        return [], [], 20
+        return [], [], 20, False, None
 
 def _normalize_colname(name: str) -> str:
     return ''.join(ch.lower() for ch in name.strip())
@@ -283,7 +437,7 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
     """Create d1_processed data by combining map setpoints with d1 data columns"""
     try:
         # Load setpoints from map
-        setpoints_data, map_columns, _ = load_setpoints_from_map(map_name)
+        setpoints_data, map_columns, _, instability, speed_correction = load_setpoints_from_map(map_name)
         if not setpoints_data or not map_columns:
             return [], []
         
@@ -357,10 +511,6 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
                             pass
                     per_setpoint_values[sp_name] = vals
 
-        # Find tare values for CLW/CDW calculations
-        drag_tare = 0.0
-        lift_tare = 0.0
-        
         # Helper function to safely convert to float
         def to_float(x):
             try:
@@ -370,37 +520,162 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
             except Exception:
                 return float('nan')
         
-        # Look for tare values in per_setpoint_values or d1_data
+        # Find tare values - support instability mode with speed-matched zeros
+        # Build tare dictionaries: by speed and by name
+        tare_values = {}  # {speed: {'D': value, 'L': value}}
+        tare_by_name = {}  # {setpoint_name: {'D': value, 'L': value}}
+        
         if per_setpoint_values:
-            if 'ZeroD1' in per_setpoint_values and 'D' in per_setpoint_values['ZeroD1']:
-                drag_tare = per_setpoint_values['ZeroD1']['D']
-            if 'ZeroL' in per_setpoint_values and 'L' in per_setpoint_values['ZeroL']:
-                lift_tare = per_setpoint_values['ZeroL']['L']
-        else:
-            # Fallback: look through setpoints_data for ZeroD1/ZeroL
-            sp_col_idx = _find_col_index('setpoint', map_columns)
-            if sp_col_idx != -1:
-                for i, sp_row in enumerate(setpoints_data):
-                    sp_name = sp_row[sp_col_idx]
-                    if str(sp_name) == 'ZeroD1' and 'D' in d1_column_indices and i < len(d1_data):
-                        drag_tare = to_float(d1_data[i][d1_column_indices['D']])
-                    if str(sp_name) == 'ZeroL' and 'L' in d1_column_indices and i < len(d1_data):
-                        lift_tare = to_float(d1_data[i][d1_column_indices['L']])
+            # Collect all zero setpoints and their speeds
+            for sp_name, vals in per_setpoint_values.items():
+                if 'Zero' in sp_name:
+                    # Find the speed for this zero setpoint from map
+                    sp_col_idx = _find_col_index('setpoint', map_columns)
+                    road_speed_idx = _find_col_index('road_speed', map_columns)
+                    if sp_col_idx != -1 and road_speed_idx != -1:
+                        speed = None
+                        for sp_row in setpoints_data:
+                            if str(sp_row[sp_col_idx]) == sp_name:
+                                speed = to_float(sp_row[road_speed_idx])
+                                break
+                        if speed is not None:
+                            if speed not in tare_values:
+                                tare_values[speed] = {}
+                            if sp_name not in tare_by_name:
+                                tare_by_name[sp_name] = {}
+                            if 'D' in vals:
+                                tare_values[speed]['D'] = vals['D']
+                                tare_by_name[sp_name]['D'] = vals['D']
+                            if 'L' in vals:
+                                tare_values[speed]['L'] = vals['L']
+                                tare_by_name[sp_name]['L'] = vals['L']
+        
+        # Helper function to get appropriate tare value based on speed
+        def get_tare_for_speed(speed, tare_type):
+            # Lift tare ALWAYS uses ZeroL (2 mph), regardless of instability mode
+            if tare_type == 'L':
+                return tare_by_name.get('ZeroL', {}).get('L', 0.0)
+            
+            # Drag tare handling
+            if not instability:
+                # Non-instability mode: use ZeroD1 specifically by name
+                return tare_by_name.get('ZeroD1', {}).get('D', 0.0)
+            else:
+                # Instability mode: match speed for drag (50 mph -> ZeroD2, 60 mph -> ZeroD1)
+                if speed in tare_values and 'D' in tare_values[speed]:
+                    return tare_values[speed]['D']
+                # Fallback to closest speed
+                speeds = sorted([s for s in tare_values.keys() if 'D' in tare_values[s]])
+                if not speeds:
+                    return 0.0
+                closest_speed = min(speeds, key=lambda s: abs(s - speed))
+                return tare_values[closest_speed].get('D', 0.0)
+        
+        if instability:
+            print(f"[WT] Instability mode enabled for map '{map_name}'. Found tare values at speeds: {sorted(tare_values.keys())}")
 
-        # Find minimum CD from rows with valid w_cx for CDW calculation
+        # Calculate speed correction deltas if configured (BEFORE min_CD calculation)
+        delta_CL = 0.0
+        delta_CD = 0.0
+        unstable_50_name = None
+        if speed_correction and instability:
+            ref_60_name = speed_correction.get('reference_60')
+            ref_50_name = speed_correction.get('reference_50')
+            unstable_50_name = speed_correction.get('unstable_50')
+            
+            if ref_60_name and ref_50_name and unstable_50_name:
+                # Find the data for reference setpoints
+                ref_60_data = None
+                ref_50_data = None
+                
+                sp_col_idx = _find_col_index('setpoint', map_columns)
+                if sp_col_idx != -1:
+                    for i, sp_row in enumerate(setpoints_data):
+                        sp_name_check = str(sp_row[sp_col_idx])
+                        if sp_name_check == ref_60_name:
+                            # Get L, D, DYNPR for reference at 60 mph
+                            if ref_60_name in per_setpoint_values:
+                                ref_60_data = per_setpoint_values[ref_60_name]
+                            elif i < len(d1_data) and 'L' in d1_column_indices and 'D' in d1_column_indices and 'DYNPR' in d1_column_indices:
+                                ref_60_data = {
+                                    'L': to_float(d1_data[i][d1_column_indices['L']]),
+                                    'D': to_float(d1_data[i][d1_column_indices['D']]),
+                                    'DYNPR': to_float(d1_data[i][d1_column_indices['DYNPR']]),
+                                    'road_speed': to_float(sp_row[_find_col_index('road_speed', map_columns)])
+                                }
+                        elif sp_name_check == ref_50_name:
+                            # Get L, D, DYNPR for reference at 50 mph
+                            if ref_50_name in per_setpoint_values:
+                                ref_50_data = per_setpoint_values[ref_50_name]
+                            elif i < len(d1_data) and 'L' in d1_column_indices and 'D' in d1_column_indices and 'DYNPR' in d1_column_indices:
+                                ref_50_data = {
+                                    'L': to_float(d1_data[i][d1_column_indices['L']]),
+                                    'D': to_float(d1_data[i][d1_column_indices['D']]),
+                                    'DYNPR': to_float(d1_data[i][d1_column_indices['DYNPR']]),
+                                    'road_speed': to_float(sp_row[_find_col_index('road_speed', map_columns)])
+                                }
+                
+                # Calculate deltas if both reference points found
+                if ref_60_data and ref_50_data:
+                    # Calculate CL and CD for reference at 60 mph
+                    L_60 = ref_60_data.get('L', 0.0)
+                    D_60 = ref_60_data.get('D', 0.0)
+                    dynpr_60 = ref_60_data.get('DYNPR', 0.0)
+                    speed_60 = ref_60_data.get('road_speed', 60.0)
+                    lift_tare_60 = get_tare_for_speed(speed_60, 'L')
+                    drag_tare_60 = get_tare_for_speed(speed_60, 'D')
+                    
+                    CL_60 = 0.0
+                    CD_60 = 0.0
+                    if not (np.isnan(L_60) or np.isnan(lift_tare_60) or np.isnan(dynpr_60) or dynpr_60 == 0):
+                        CL_60 = (L_60 - lift_tare_60) * LBF_TO_NEWTONS / (dynpr_60 * PSF_TO_PA)
+                    if not (np.isnan(D_60) or np.isnan(drag_tare_60) or np.isnan(dynpr_60) or dynpr_60 == 0):
+                        CD_60 = (D_60 - drag_tare_60) * LBF_TO_NEWTONS / (dynpr_60 * PSF_TO_PA)
+                    
+                    # Calculate CL and CD for reference at 50 mph
+                    L_50 = ref_50_data.get('L', 0.0)
+                    D_50 = ref_50_data.get('D', 0.0)
+                    dynpr_50 = ref_50_data.get('DYNPR', 0.0)
+                    speed_50 = ref_50_data.get('road_speed', 50.0)
+                    lift_tare_50 = get_tare_for_speed(speed_50, 'L')
+                    drag_tare_50 = get_tare_for_speed(speed_50, 'D')
+                    
+                    CL_50 = 0.0
+                    CD_50 = 0.0
+                    if not (np.isnan(L_50) or np.isnan(lift_tare_50) or np.isnan(dynpr_50) or dynpr_50 == 0):
+                        CL_50 = (L_50 - lift_tare_50) * LBF_TO_NEWTONS / (dynpr_50 * PSF_TO_PA)
+                    if not (np.isnan(D_50) or np.isnan(drag_tare_50) or np.isnan(dynpr_50) or dynpr_50 == 0):
+                        CD_50 = (D_50 - drag_tare_50) * LBF_TO_NEWTONS / (dynpr_50 * PSF_TO_PA)
+                    
+                    # Calculate deltas
+                    delta_CL = CL_60 - CL_50
+                    delta_CD = CD_60 - CD_50
+                    
+                    print(f"[WT] Speed correction: {ref_60_name}@60mph CL={CL_60:.6f} CD={CD_60:.6f}, {ref_50_name}@50mph CL={CL_50:.6f} CD={CD_50:.6f}")
+                    print(f"[WT] Speed correction deltas: delta_CL={delta_CL:.6f}, delta_CD={delta_CD:.6f}")
+                    print(f"[WT] Will apply correction to unstable setpoint: {unstable_50_name}")
+
+        # Find minimum CD from rows with valid w_cx (post speed-correction)
         min_cd = float('inf')
         for i, setpoint_row in enumerate(setpoints_data):
             try:
-                # Get D, DYNPR, and w_cx values for this setpoint
-                D = 0.0
-                dynpr = 0.0
-                wcx = 0.0
-                
                 # Get setpoint name
                 sp_name = None
                 sp_col_idx = _find_col_index('setpoint', map_columns)
                 if sp_col_idx != -1:
                     sp_name = setpoint_row[sp_col_idx]
+                
+                # Exclude reference setpoints from min_CD calculation if speed_correction is configured
+                if speed_correction and instability and sp_name:
+                    ref_60_name = speed_correction.get('reference_60')
+                    ref_50_name = speed_correction.get('reference_50')
+                    if sp_name in [ref_60_name, ref_50_name]:
+                        continue  # Skip reference setpoints
+                
+                # Get D, DYNPR, and w_cx values for this setpoint
+                D = 0.0
+                dynpr = 0.0
+                wcx = 0.0
                 
                 # Extract D and DYNPR values
                 if sp_name is not None and sp_name in per_setpoint_values:
@@ -411,14 +686,31 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
                     D = to_float(d1_data[row_index][d1_column_indices['D']])
                     dynpr = to_float(d1_data[row_index][d1_column_indices['DYNPR']])
                 
-                # Extract w_cx from map setpoint
+                # Extract w_cx, road_speed, and wind_speed from map setpoint
                 wcx_idx = _find_col_index('w_cx', map_columns)
+                road_speed_idx = _find_col_index('road_speed', map_columns)
+                wind_speed_idx = _find_col_index('wind_speed', map_columns)
                 if wcx_idx != -1:
                     wcx = to_float(setpoint_row[wcx_idx])
+                road_speed = to_float(setpoint_row[road_speed_idx]) if road_speed_idx != -1 else 60.0
+                wind_speed = to_float(setpoint_row[wind_speed_idx]) if wind_speed_idx != -1 else 60.0
+                
+                # Skip rows with wind_speed=0 (Zero/tare setpoints)
+                if wind_speed == 0:
+                    continue
+                
+                # Get appropriate drag tare for this speed
+                drag_tare = get_tare_for_speed(road_speed, 'D')
                 
                 # Calculate CD if all values are valid
                 if not (np.isnan(D) or np.isnan(drag_tare) or np.isnan(dynpr) or np.isnan(wcx) or dynpr == 0):
                     cd = (D - drag_tare) * LBF_TO_NEWTONS / (dynpr * PSF_TO_PA)
+                    
+                    # Apply speed correction if this is the unstable setpoint
+                    if speed_correction and instability and unstable_50_name and sp_name == unstable_50_name:
+                        if not np.isnan(cd):
+                            cd = cd + delta_CD
+                    
                     if not np.isnan(cd):
                         min_cd = min(min_cd, cd)
             except Exception:
@@ -428,7 +720,7 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
         if min_cd == float('inf'):
             min_cd = 0.0
         
-        print(f"[WT] Minimum CD found for d1_processed (from rows with valid w_cx): {min_cd:.6f}")
+        print(f"[WT] Minimum CD found for d1_processed (valid w_cx, wind_speed>0, post-correction, excl. references): {min_cd:.6f}")
 
         for i, setpoint_row in enumerate(setpoints_data):
             combined_row = setpoint_row.copy()
@@ -479,32 +771,53 @@ def create_d1_processed_data(map_name, d1_data, d1_columns, d1_structured=None, 
                     D = to_float(d1_data[row_index][d1_column_indices['D']])
                     dynpr = to_float(d1_data[row_index][d1_column_indices['DYNPR']])
                 
-                # Extract w_cz and w_cx from map setpoint
+                # Extract w_cz, w_cx, and road_speed from map setpoint
                 wcz_idx = _find_col_index('w_cz', map_columns)
                 wcx_idx = _find_col_index('w_cx', map_columns)
+                road_speed_idx = _find_col_index('road_speed', map_columns)
                 if wcz_idx != -1:
                     wcz = to_float(setpoint_row[wcz_idx])
                 if wcx_idx != -1:
                     wcx = to_float(setpoint_row[wcx_idx])
+                road_speed = to_float(setpoint_row[road_speed_idx]) if road_speed_idx != -1 else 60.0
+                
+                # Get appropriate tares for this setpoint's speed
+                lift_tare = get_tare_for_speed(road_speed, 'L')
+                drag_tare = get_tare_for_speed(road_speed, 'D')
                 
                 # Calculate CL, CD, CLW and CDW using intermediate steps
                 # Calculate CL (Coefficient of Lift) first
+                cl = float('nan')
+                cd = float('nan')
                 if not np.isnan(L) and not np.isnan(lift_tare) and not np.isnan(dynpr) and dynpr != 0:
                     cl = (L - lift_tare) * LBF_TO_NEWTONS / (dynpr * PSF_TO_PA)
-                    if not np.isnan(cl):
-                        cl_val = f"{cl:.6f}"
-                        if not np.isnan(wcz):
-                            clw = cl * wcz  # CLW = CL * w_cz
-                            clw_val = f"{clw:.6f}"
                 
                 # Calculate CD (Coefficient of Drag) first
                 if not np.isnan(D) and not np.isnan(drag_tare) and not np.isnan(dynpr) and dynpr != 0:
                     cd = (D - drag_tare) * LBF_TO_NEWTONS / (dynpr * PSF_TO_PA)
+                
+                # Apply speed correction if this is the unstable setpoint
+                if speed_correction and instability and sp_name == speed_correction.get('unstable_50'):
+                    cl_before = cl
+                    cd_before = cd
+                    if not np.isnan(cl):
+                        cl = cl + delta_CL
                     if not np.isnan(cd):
-                        cd_val = f"{cd:.6f}"
-                        if not np.isnan(wcx):
-                            cdw = cd * wcx  # CDW = CD * w_cx (back to original formula)
-                            cdw_val = f"{cdw:.6f}"
+                        cd = cd + delta_CD
+                    print(f"[WT] Applied speed correction to {sp_name}: CL {cl_before:.6f} -> {cl:.6f}, CD {cd_before:.6f} -> {cd:.6f}")
+                
+                # Store CL and CD values and calculate weighted values
+                if not np.isnan(cl):
+                    cl_val = f"{cl:.6f}"
+                    if not np.isnan(wcz):
+                        clw = cl * wcz  # CLW = CL * w_cz
+                        clw_val = f"{clw:.6f}"
+                
+                if not np.isnan(cd):
+                    cd_val = f"{cd:.6f}"
+                    if not np.isnan(wcx):
+                        cdw = cd * wcx  # CDW = CD * w_cx (back to original formula)
+                        cdw_val = f"{cdw:.6f}"
                 
                 # Per-row debug for short map while building d1_processed
                 if map_name == "short":
@@ -793,7 +1106,7 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                     # Create d1_processed dataset with setpoints from the selected map and d1 data
                     if selected_map:
                         # Validate row counts before creation and get min_Cx_weighting
-                        sp_data_for_count, _sp_cols, min_Cx_weighting = load_setpoints_from_map(selected_map)
+                        sp_data_for_count, _sp_cols, min_Cx_weighting, instability, speed_correction = load_setpoints_from_map(selected_map)
                         map_rows = len(sp_data_for_count) if sp_data_for_count else 0
                         d1_rows = int(d1.shape[0]) if hasattr(d1, 'shape') and len(d1.shape) > 0 else 0
                         if map_rows > 0 and d1_rows > 0 and map_rows != d1_rows:
@@ -811,7 +1124,7 @@ def update_imported_runs_list(homologation, n_clicks_list, active_cell, last_mes
                                 # Store column names as attributes
                                 d1_processed_ds.attrs["columns"] = np.array(combined_columns, dtype='S50')
                                 # Compute weighted coefficients and store on run
-                                ok, min_cd_msg = compute_weighted_coeffs_from_d1_processed(run_grp, map_name=selected_map, min_Cx_weighting=min_Cx_weighting)
+                                ok, min_cd_msg = compute_weighted_coeffs_from_d1_processed(run_grp, map_name=selected_map, min_Cx_weighting=min_Cx_weighting, instability=instability, speed_correction=speed_correction)
                                 if not ok:
                                     message = (message + f"; {min_cd_msg}") if message else min_cd_msg
                                 else:
@@ -1162,20 +1475,20 @@ def save_table_changes(table_data, homologation):
                                 # Attempt to load structured d1 via file path if possible is not trivial here; use raw arrays
 
                             # Validate row counts between selected map and d1
-                            sp_data_for_count, _sp_cols, min_Cx_weighting_new = load_setpoints_from_map(new_map)
+                            sp_data_for_count, _sp_cols, min_Cx_weighting_new, instability_new, speed_correction_new = load_setpoints_from_map(new_map)
                             map_rows = len(sp_data_for_count) if sp_data_for_count else 0
                             d1_rows = int(d1_data.shape[0]) if hasattr(d1_data, 'shape') and len(d1_data.shape) > 0 else (len(d1_data) if isinstance(d1_data, (list, np.ndarray)) else 0)
                             if map_rows > 0 and d1_rows > 0 and map_rows != d1_rows:
                                 # Restore d1_processed with old map before returning error
                                 if old_map:
-                                    _, _, min_Cx_weighting_old = load_setpoints_from_map(old_map)
+                                    _, _, min_Cx_weighting_old, instability_old, speed_correction_old = load_setpoints_from_map(old_map)
                                     combined_data, combined_columns = create_d1_processed_data(old_map, d1_data, d1_columns, d1_structured, d1_structured_cols)
                                     if combined_data and combined_columns:
                                         combined_array = np.array(combined_data, dtype='S50')
                                         d1_processed_ds = run_grp.create_dataset("d1_processed", data=combined_array)
                                         d1_processed_ds.attrs["description"] = f"Setpoints from map: {old_map} with d1 data columns"
                                         d1_processed_ds.attrs["columns"] = np.array(combined_columns, dtype='S50')
-                                        compute_weighted_coeffs_from_d1_processed(run_grp, map_name=old_map, min_Cx_weighting=min_Cx_weighting_old)
+                                        compute_weighted_coeffs_from_d1_processed(run_grp, map_name=old_map, min_Cx_weighting=min_Cx_weighting_old, instability=instability_old, speed_correction=speed_correction_old)
                                 return f"Error: map has {map_rows} rows but d1 has {d1_rows} rows. Map remains: {old_map}"
 
                             # Create combined data with map setpoints and d1 columns
@@ -1185,7 +1498,7 @@ def save_table_changes(table_data, homologation):
                                 d1_processed_ds = run_grp.create_dataset("d1_processed", data=combined_array)
                                 d1_processed_ds.attrs["description"] = f"Setpoints from map: {new_map} with d1 data columns"
                                 d1_processed_ds.attrs["columns"] = np.array(combined_columns, dtype='S50')
-                                ok, min_cd_msg = compute_weighted_coeffs_from_d1_processed(run_grp, map_name=new_map, min_Cx_weighting=min_Cx_weighting_new)
+                                ok, min_cd_msg = compute_weighted_coeffs_from_d1_processed(run_grp, map_name=new_map, min_Cx_weighting=min_Cx_weighting_new, instability=instability_new, speed_correction=speed_correction_new)
                                 if not ok:
                                     return min_cd_msg
                                 else:
